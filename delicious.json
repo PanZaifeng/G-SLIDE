@@ -1,0 +1,26 @@
+{
+  "input_size": 782585,
+  "node_num_per_layer": [128, 205443],
+
+  "max_batch_size": 128,
+  "node_capacity_per_layer": [16384, 819200],
+  "input_capacity": 131072,
+  "label_capacity": 409600,
+  
+  "K": 8, "L": 50,
+  "bin_size": 8, "pack_num": 4,
+  "tbl_bucket_num": 262144,
+  "bucket_unit_size": 128,
+  "tbl_capacity": 13824,
+
+  "max_act_nums": [128, 6400],
+  "max_label_num": 3200,
+  "lr": 0.0001,
+  "BETA1": 0.9, "BETA2": 0.999,
+  "rebuild_period": 5,
+  "thread_num": 128,
+  "epoch_num": 1,
+
+  "train_fname": "dataset/DeliciousLarge/deliciousLarge_train.txt",
+  "test_fname": "dataset/DeliciousLarge/deliciousLarge_test.txt"
+}
