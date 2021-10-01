@@ -1,0 +1,79 @@
+#include "CscActNodes.h"
+
+struct GPUMultiLinkedHashTable {
+  const int max_tbl_num;
+  const size_t bucket_num_per_tbl;
+  const size_t pool_size;
+
+  int *d_multi_tbl_keys;
+  int *d_multi_tbl_vals;
+  int *d_multi_tbl_nexts;
+  int *d_multi_tbl_locks;
+  int *d_multi_tbl_sizes;
+  int *d_multi_tbl_pool_used_sizes;
+
+  int threshold;
+
+  struct filter {
+    int threshold;
+
+    filter(int threshold) : threshold(threshold) {}
+
+    __device__ bool operator()(const int cnt) { return cnt >= threshold; }
+  };
+
+  GPUMultiLinkedHashTable(const int max_tbl_num,
+                          const size_t bucket_num_per_tbl,
+                          const size_t pool_size, const int threshold);
+
+  // virtual ~GPUMultiLinkedHashTable();
+
+  virtual void free();
+
+  void init_tbls();
+
+  __forceinline__ __device__ int d_hashier(const int key) {
+    return key * 2654435761 & (~(1 << 31));
+  }
+
+  __device__ void d_block_add(const int tbl_id, const int key, bool exec_flag);
+
+  __device__ void d_block_reduce_cnt(const int *d_raw_keys,
+                                     const int raw_key_begin,
+                                     const int raw_key_end, const int tbl_id);
+
+  __device__ void d_activate_labels_seq(const int *d_labels,
+                                        const int label_begin,
+                                        const int label_end, const int tbl_id);
+
+  void block_reduce_cnt(const CscActNodes &cmprs_gathered, const int L,
+                        const int batch_size, const int thread_num);
+
+  void activate_labels_seq(const CscActNodes &cmprs_labels,
+                           const int batch_size, const int thread_num);
+
+  void block_reduce_cnt(const int *d_gathered_nodes,
+                        const int *d_gathered_offsets, const int L,
+                        const int batch_size, const int thread_num);
+
+  void activate_labels_seq(const int *d_labels, const int *d_label_offsets,
+                           const int batch_size, const int thread_num);
+
+  void get_act_nodes(CscActNodes &csc_acts, const int batch_size);
+};
+
+__global__ void block_reduce_cnt_knl(
+    const CscActNodes cmprs_gathered, const int L,
+    GPUMultiLinkedHashTable multi_linked_htables);
+
+__global__ void activate_labels_seq_knl(
+    const CscActNodes cmprs_labels, const int batch_size,
+    GPUMultiLinkedHashTable multi_linked_htables);
+
+__global__ void block_reduce_cnt_knl(
+    const int *d_gathered_nodes, const int *d_gathered_offsets, const int L,
+    GPUMultiLinkedHashTable multi_linked_htables);
+
+__global__ void activate_labels_seq_knl(
+    const int *d_labels, const int *d_label_offsets, const int batch_size,
+    GPUMultiLinkedHashTable multi_linked_htables);
