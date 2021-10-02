@@ -8,21 +8,15 @@ SoftmaxLayer::SoftmaxLayer(const int prev_node_num, const int node_num,
                            const int K, const int L, const int bin_size,
                            const int bucket_num_per_tbl,
                            const int bucket_capacity, const int threshold,
-                           const int tbl_num_per_tile,
+                           const int min_act_num, const int tbl_num_per_tile,
                            const int tbl_num_per_thread,
                            const int linked_bucket_num_per_tbl,
                            const int linked_pool_size)
     : Layer(prev_node_num, node_num, max_batch_size, node_capacity) {
   lsh_tbls_ptr = std::make_shared<LSH>(
       node_num, prev_node_num, max_batch_size, K, L, bin_size,
-      bucket_num_per_tbl, bucket_capacity, threshold, tbl_num_per_tile,
+      bucket_num_per_tbl, bucket_capacity, threshold, min_act_num, tbl_num_per_tile,
       tbl_num_per_thread, linked_bucket_num_per_tbl, linked_pool_size);
-
-  // lsh_tbls_ptr = std::make_shared<LSH>(node_num, prev_node_num, K, L,
-  // bin_size,
-  //                                      tbl_num_per_tile, bucket_num_per_tbl,
-  //                                      bucket_capacity, 12800,
-  //                                      max_batch_size);
 
   GPUTimer timer;
   timer.start();
@@ -48,9 +42,6 @@ void SoftmaxLayer::forward(const Layer &prev_layer,
   lsh_tbls_ptr->query_act_nodes(prev_layer.csc_acts, cmprs_labels, batch_size,
                                 csc_acts);
 
-  // lsh_tbls_ptr->get_act_nodes(prev_layer.csc_acts.d_vals, cmprs_labels,
-  //                             batch_size, csc_acts);
-
   const int smem_size =
       (sizeof(int) + sizeof(float)) * (thread_num + max_act_num) +
       sizeof(int) * max_label_num;
@@ -62,8 +53,6 @@ void SoftmaxLayer::forward(const Layer &prev_layer,
 void SoftmaxLayer::forward(const Layer &prev_layer, const int batch_size,
                            const int thread_num, const int max_act_num) {
   assert(prev_layer.node_num == prev_node_num);
-
-  // lsh_tbls_ptr->query_act_nodes(prev_layer.csc_acts, batch_size, csc_acts);
 
   const int smem_size =
       (sizeof(int) + sizeof(float)) * (thread_num + max_act_num);

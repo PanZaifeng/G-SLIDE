@@ -9,7 +9,7 @@
 
 __global__ void init_bins_knl(int *d_bins, const int prev_node_num,
                               const int tot_elem_num) {
-  const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int tid= threadIdx.x + blockIdx.x * blockDim.x;
   if (tid >= tot_elem_num) return;
 
   d_bins[tid] = tid % prev_node_num;
@@ -18,10 +18,10 @@ __global__ void init_bins_knl(int *d_bins, const int prev_node_num,
 __global__ void gen_rand_keys_knl(unsigned int *d_rand_keys, const int seed,
                                   const int prev_node_num,
                                   const int tot_elem_num) {
-  const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int tid= threadIdx.x + blockIdx.x * blockDim.x;
   if (tid >= tot_elem_num) return;
 
-  const unsigned int permute_id = tid / prev_node_num;
+  const int permute_id = tid / prev_node_num;
   unsigned int key = permute_id << 16;
 
   thrust::minstd_rand rand_eng(seed);
@@ -29,6 +29,17 @@ __global__ void gen_rand_keys_knl(unsigned int *d_rand_keys, const int seed,
   key |= rand_eng() & (1 << 16 - 1);
 
   d_rand_keys[tid] = key;
+}
+
+__global__ void gen_rand_keys_knl(int *d_rand_keys, const int seed,
+                                  const int node_num) {
+  const int tid= threadIdx.x + blockIdx.x * blockDim.x;
+  if (tid >= node_num) return;
+
+  thrust::minstd_rand rand_eng(seed);
+  rand_eng.discard(tid);
+
+  d_rand_keys[tid] = rand_eng();
 }
 
 // Assumption: prev_node_num is small while node_num is large

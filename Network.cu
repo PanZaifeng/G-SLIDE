@@ -11,8 +11,8 @@ Network::Network(const std::vector<int> &node_num_per_layer,
                  const int input_capacity, const int label_capacity,
                  const int K, const int L, const int bin_size,
                  const int bucket_num_per_tbl, const int bucket_capacity,
-                 const int threshold, const int tbl_num_per_tile,
-                 const int tbl_num_per_thread,
+                 const int threshold, const int min_softmax_act_num,
+                 const int tbl_num_per_tile, const int tbl_num_per_thread,
                  const int linked_bucket_num_per_tbl,
                  const int linked_pool_size)
     : csc_inputs(max_batch_size, input_capacity),
@@ -31,8 +31,8 @@ Network::Network(const std::vector<int> &node_num_per_layer,
       softmax_layer = std::make_shared<SoftmaxLayer>(
           node_num_per_layer[l - 1], node_num_per_layer[l], max_batch_size,
           node_capacity_per_layer[l], K, L, bin_size, bucket_num_per_tbl,
-          bucket_capacity, threshold, tbl_num_per_tile, tbl_num_per_thread,
-          linked_bucket_num_per_tbl, linked_pool_size);
+          bucket_capacity, threshold, min_softmax_act_num, tbl_num_per_tile,
+          tbl_num_per_thread, linked_bucket_num_per_tbl, linked_pool_size);
     } else {
       relu_layers[l] = std::make_shared<ReluLayer>(
           node_num_per_layer[l - 1], node_num_per_layer[l], max_batch_size,

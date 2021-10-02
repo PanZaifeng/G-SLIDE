@@ -93,6 +93,7 @@ int main(int argc, char *argv[]) {
   const int bucket_num_per_tbl = root["bucket_num_per_tbl"].asInt();
   const int bucket_capacity = root["bucket_capacity"].asInt();
   const int threshold = root["threshold"].asInt();
+  const int min_softmax_act_num = root["min_softmax_act_num"].asInt();
   const int tbl_num_per_tile = root["tbl_num_per_tile"].asInt();
   const int tbl_num_per_thread = root["tbl_num_per_thread"].asInt();
   const int linked_bucket_num_per_tbl =
@@ -102,7 +103,7 @@ int main(int argc, char *argv[]) {
   Network network(node_num_per_layer, node_capacity_per_layer, input_size,
                   max_batch_size, input_capacity, label_capacity, K, L,
                   bin_size, bucket_num_per_tbl, bucket_capacity, threshold,
-                  tbl_num_per_tile, tbl_num_per_thread,
+                  min_softmax_act_num, tbl_num_per_tile, tbl_num_per_thread,
                   linked_bucket_num_per_tbl, linked_pool_size);
 
   const std::vector<int> max_act_nums = jarr_to_vec(root["max_act_nums"]);

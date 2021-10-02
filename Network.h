@@ -29,8 +29,9 @@ class Network {
           const int label_capacity, const int K, const int L,
           const int bin_size, const int bucket_num_per_tbl,
           const int bucket_capacity, const int threshold,
-          const int tbl_num_per_tile, const int tbl_num_per_thread,
-          const int linked_bucket_num_per_tbl, const int linked_pool_size);
+          const int min_softmax_act_num, const int tbl_num_per_tile,
+          const int tbl_num_per_thread, const int linked_bucket_num_per_tbl,
+          const int linked_pool_size);
 
   Network(const Network &) = delete;
   Network(Network &&) = delete;

@@ -6,6 +6,9 @@ class LSH {
   unsigned int *d_rand_keys;
   int *d_bins;
 
+  int *d_rand_node_keys;
+  int *d_rand_nodes;
+
   const int node_num;
   const int prev_node_num;
 
@@ -20,12 +23,12 @@ class LSH {
   int *d_buckets;
   int *d_bucket_sizes;
 
+  const int min_act_num;
+
   int *d_hashed_bucket_ids_colmajor;
   // int *d_hashed_bucket_sizes;
 
   CscActNodes cmprs_gathered;
-  // int *d_gathered_nodes;
-  // int *d_gathered_offsets;
 
   GPUMultiLinkedHashTable multi_linked_htables;
 
@@ -33,13 +36,14 @@ class LSH {
   LSH(const int node_num, const int prev_node_num, const int max_batch_size,
       const int K, const int L, const int bin_size,
       const int bucket_num_per_tbl, const int bucket_capacity,
-      const int threshold, const int tbl_num_per_tile,
+      const int threshold, const int min_act_num, const int tbl_num_per_tile,
       const int tbl_num_per_thread, const int linked_bucket_num_per_tbl,
       const int linked_pool_size);
 
   ~LSH();
 
   void shuffle_bins();
+  void shuffle_rand();
 
   void build(const float *d_weights_rowmajor);
 

@@ -42,9 +42,45 @@ struct GPUMultiLinkedHashTable {
                                      const int raw_key_begin,
                                      const int raw_key_end, const int tbl_id);
 
+  __forceinline__ __device__ void d_insert_label_seq(
+      const int label, int *d_tbl_keys, int *d_tbl_vals, int *d_tbl_nexts,
+      int &tbl_size, int &tbl_pool_used_size) {
+    const int bucket_idx = d_hashier(label) % bucket_num_per_tbl;
+
+    int pre_entry_idx = -1, entry_idx = bucket_idx;
+    int searched_key = d_tbl_keys[bucket_idx];
+    if (searched_key != -1 && searched_key != label) {
+      do {
+        pre_entry_idx = entry_idx;
+        entry_idx = d_tbl_nexts[pre_entry_idx];
+      } while (entry_idx != -1 &&
+               (searched_key = d_tbl_keys[entry_idx]) != label);
+    }
+
+    if (searched_key == label) {
+      const int old_val = d_tbl_vals[entry_idx];
+      if (old_val < threshold) ++tbl_size;
+      d_tbl_vals[entry_idx] = old_val + threshold;
+    } else {
+      if (entry_idx == -1)
+        entry_idx = tbl_pool_used_size++ + bucket_num_per_tbl;
+      d_tbl_keys[entry_idx] = label;
+      d_tbl_vals[entry_idx] = threshold;
+      if (pre_entry_idx != -1) d_tbl_nexts[pre_entry_idx] = entry_idx;
+      ++tbl_size;
+    }
+  }
+
   __device__ void d_activate_labels_seq(const int *d_labels,
                                         const int label_begin,
                                         const int label_end, const int tbl_id);
+
+  __device__ void d_activate_labels_seq(const int *d_labels,
+                                        const int *d_rand_nodes,
+                                        const int label_begin,
+                                        const int label_end, const int tbl_id,
+                                        const int min_act_num,
+                                        const int node_num, const int seed);
 
   void block_reduce_cnt(const CscActNodes &cmprs_gathered, const int L,
                         const int batch_size, const int thread_num);
@@ -52,12 +88,10 @@ struct GPUMultiLinkedHashTable {
   void activate_labels_seq(const CscActNodes &cmprs_labels,
                            const int batch_size, const int thread_num);
 
-  void block_reduce_cnt(const int *d_gathered_nodes,
-                        const int *d_gathered_offsets, const int L,
-                        const int batch_size, const int thread_num);
-
-  void activate_labels_seq(const int *d_labels, const int *d_label_offsets,
-                           const int batch_size, const int thread_num);
+  void activate_labels_seq(const CscActNodes &cmprs_labels,
+                           const int *d_rand_nodes, const int batch_size,
+                           const int min_act_num, const int node_num,
+                           const int thread_num);
 
   void get_act_nodes(CscActNodes &csc_acts, const int batch_size);
 };
@@ -70,10 +104,7 @@ __global__ void activate_labels_seq_knl(
     const CscActNodes cmprs_labels, const int batch_size,
     GPUMultiLinkedHashTable multi_linked_htables);
 
-__global__ void block_reduce_cnt_knl(
-    const int *d_gathered_nodes, const int *d_gathered_offsets, const int L,
-    GPUMultiLinkedHashTable multi_linked_htables);
-
 __global__ void activate_labels_seq_knl(
-    const int *d_labels, const int *d_label_offsets, const int batch_size,
-    GPUMultiLinkedHashTable multi_linked_htables);
+    const CscActNodes cmprs_labels, const int *d_rand_nodes,
+    const int batch_size, const int min_act_num, const int node_num,
+    const int seed, GPUMultiLinkedHashTable multi_linked_htables);

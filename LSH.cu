@@ -11,7 +11,7 @@
 LSH::LSH(const int node_num, const int prev_node_num, const int max_batch_size,
          const int K, const int L, const int bin_size,
          const int bucket_num_per_tbl, const int bucket_capacity,
-         const int threshold, const int tbl_num_per_tile,
+         const int threshold, const int min_act_num, const int tbl_num_per_tile,
          const int tbl_num_per_thread, const int linked_bucket_num_per_tbl,
          const int linked_pool_size)
     : node_num(node_num),
@@ -21,6 +21,7 @@ LSH::LSH(const int node_num, const int prev_node_num, const int max_batch_size,
       bin_size(bin_size),
       bucket_num_per_tbl(bucket_num_per_tbl),
       bucket_capacity(bucket_capacity),
+      min_act_num(min_act_num),
       tot_elem_num(K * L * bin_size),
       tbl_num_per_tile(tbl_num_per_tile),
       tbl_num_per_thread(tbl_num_per_thread),
@@ -36,6 +37,10 @@ LSH::LSH(const int node_num, const int prev_node_num, const int max_batch_size,
   const int block_num = (tot_elem_num + thread_num - 1) / thread_num;
   init_bins_knl<<<block_num, thread_num>>>(d_bins, prev_node_num, tot_elem_num);
 
+  CUDA_CHECK(cudaMallocManaged(&d_rand_node_keys, sizeof(int) * node_num));
+  CUDA_CHECK(cudaMalloc(&d_rand_nodes, sizeof(int) * node_num));
+  thrust::sequence(thrust::device, d_rand_nodes, d_rand_nodes + node_num);
+
   const size_t tot_bucket_num = L * bucket_num_per_tbl;
   const size_t tot_bucket_capacity = tot_bucket_num * bucket_capacity;
   CUDA_CHECK(cudaMallocManaged(&d_buckets, sizeof(int) * tot_bucket_capacity));
@@ -43,13 +48,6 @@ LSH::LSH(const int node_num, const int prev_node_num, const int max_batch_size,
 
   CUDA_CHECK(cudaMallocManaged(&d_hashed_bucket_ids_colmajor,
                                sizeof(int) * L * max_batch_size));
-
-  // CUDA_CHECK(cudaMallocManaged(
-  //     &d_gathered_nodes, sizeof(int) * bucket_capacity * L *
-  //     max_batch_size));
-  // CUDA_CHECK(cudaMallocManaged(&d_gathered_offsets,
-  //                              sizeof(int) * (1 + L * max_batch_size)));
-  // CUDA_CHECK(cudaMemset(d_gathered_offsets, 0, sizeof(int)));
 }
 
 LSH::~LSH() {
@@ -61,8 +59,6 @@ LSH::~LSH() {
 
   CUDA_CHECK(cudaFree(d_hashed_bucket_ids_colmajor));
 
-  // CUDA_CHECK(cudaFree(d_gathered_nodes));
-  // CUDA_CHECK(cudaFree(d_gathered_offsets));
   cmprs_gathered.free();
   multi_linked_htables.free();
 }
@@ -72,13 +68,22 @@ void LSH::shuffle_bins() {
   const int block_num = (tot_elem_num + thread_num - 1) / thread_num;
   gen_rand_keys_knl<<<block_num, thread_num>>>(d_rand_keys, rand(),
                                                prev_node_num, tot_elem_num);
-
   thrust::sort_by_key(thrust::device, d_rand_keys, d_rand_keys + tot_elem_num,
                       d_bins);
 }
 
+void LSH::shuffle_rand() {
+  const int thread_num = 128;
+  const int block_num = (node_num + thread_num - 1) / thread_num;
+  gen_rand_keys_knl<<<block_num, thread_num>>>(d_rand_node_keys, rand(),
+                                               node_num);
+  thrust::sort_by_key(thrust::device, d_rand_node_keys,
+                      d_rand_node_keys + node_num, d_rand_nodes);
+}
+
 void LSH::build(const float *d_weights_rowmajor) {
   shuffle_bins();
+  shuffle_rand();
   CUDA_CHECK(
       cudaMemset(d_bucket_sizes, 0, sizeof(int) * L * bucket_num_per_tbl));
 
@@ -128,69 +133,10 @@ void LSH::query_act_nodes(const CscActNodes &csc_inputs,
   multi_linked_htables.init_tbls();
   multi_linked_htables.block_reduce_cnt(cmprs_gathered, L, batch_size,
                                         thread_num);
-  multi_linked_htables.activate_labels_seq(cmprs_labels, batch_size,
+  multi_linked_htables.activate_labels_seq(cmprs_labels, d_rand_nodes,
+                                           batch_size, min_act_num, node_num,
                                            thread_num);
   multi_linked_htables.get_act_nodes(csc_acts, batch_size);
-
-  /*
-  std::vector<int> h_gathered_nodes;
-  std::vector<int> h_gathered_offsets;
-  cmprs_gathered.extract_to(h_gathered_nodes, h_gathered_offsets, L *
-  batch_size);
-
-  std::vector<std::unordered_map<int, int>> golden_maps(batch_size);
-  for (int i = 0; i < batch_size; ++i) {
-    int begin = h_gathered_offsets[i * L];
-    int end = h_gathered_offsets[(i + 1) * L];
-    for (int j = begin; j < end; ++j) {
-      int node = h_gathered_nodes[j];
-      ++golden_maps[i][node];
-    }
-  }
-
-  std::vector<int> h_labels;
-  std::vector<int> h_label_offsets;
-  cmprs_labels.extract_to(h_labels, h_label_offsets, batch_size);
-
-  for (int i = 0; i < batch_size; ++i) {
-    int begin = h_label_offsets[i];
-    int end = h_label_offsets[i + 1];
-    for (int j = begin; j < end; ++j) {
-      int node = h_labels[j];
-      ++golden_maps[i][node];
-    }
-  }
-
-  std::vector<int> h_cmprs_nodes;
-  std::vector<int> h_cmprs_offsets;
-  csc_acts.extract_to(h_cmprs_nodes, h_cmprs_offsets, batch_size);
-
-  bool pass = true;
-  for (int i = 0; i < batch_size; ++i) {
-    int begin = h_cmprs_offsets[i];
-    int end = h_cmprs_offsets[i + 1];
-    if (end - begin != golden_maps[i].size()) {
-      printf("Size err at %d, device %d, golden %ld\n", i, end - begin,
-             golden_maps[i].size());
-      pass = false;
-    } else {
-      for (int j = begin; j < end; ++j) {
-        int node = h_cmprs_nodes[j];
-        if (!golden_maps[i].count(node)) {
-          printf("Node err %d at %d\n", node, i);
-          pass = false;
-        }
-      }
-    }
-  }
-
-  if (pass) {
-    printf("Query Pass!\n");
-  } else {
-    printf("Query Fail!\n");
-    exit(-1);
-  }
-  */
 }
 
 void LSH::query_act_nodes(const CscActNodes &csc_inputs, const int batch_size,

@@ -8,6 +8,9 @@ __global__ void gen_rand_keys_knl(unsigned int *d_rand_keys, const int seed,
                                   const int prev_node_num,
                                   const int tot_elem_num);
 
+__global__ void gen_rand_keys_knl(int *d_rand_keys, const int seed,
+                                  const int node_num);
+
 // Assumption: prev_node_num is small while node_num is large
 __global__ void init_hash_knl(const int *d_bins,
                               const float *d_weights_rowmajor,

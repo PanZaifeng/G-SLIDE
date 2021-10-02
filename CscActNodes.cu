@@ -36,8 +36,7 @@ void CscActNodes::free() {
 void CscActNodes::extract_from(const std::vector<int> &h_cmprs_nodes,
                                const std::vector<float> &h_cmprs_vals,
                                const std::vector<int> &h_cmprs_offsets) {
-  // printf("[%d, %d]\n", (int) h_cmprs_nodes.size(), node_capacity);
-  // assert(h_cmprs_nodes.size() <= node_capacity);
+  assert(h_cmprs_nodes.size() <= node_capacity);
 
   assert(val_enabled);
 
@@ -54,8 +53,7 @@ void CscActNodes::extract_from(const std::vector<int> &h_cmprs_nodes,
 
 void CscActNodes::extract_from(const std::vector<int> &h_cmprs_nodes,
                                const std::vector<int> &h_cmprs_offsets) {
-  // printf("[%d, %d]\n", (int) h_cmprs_nodes.size(), node_capacity);
-  // assert(h_cmprs_nodes.size() <= node_capacity);
+  assert(h_cmprs_nodes.size() <= node_capacity);
 
   CUDA_CHECK(cudaMemcpy(d_nodes, &h_cmprs_nodes[0],
                         sizeof(int) * h_cmprs_nodes.size(),
