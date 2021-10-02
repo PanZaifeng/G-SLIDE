@@ -82,15 +82,19 @@ int main(int argc, char *argv[]) {
 
   const std::vector<int> node_num_per_layer =
       jarr_to_vec(root["node_num_per_layer"]);
-  const std::vector<int> node_capacity_per_layer =
-      jarr_to_vec(root["node_capacity_per_layer"]);
+  // const std::vector<int> node_capacity_per_layer =
+  //     jarr_to_vec(root["node_capacity_per_layer"]);
   const int input_size = root["input_size"].asInt();
   const int max_batch_size = root["max_batch_size"].asInt();
-  const int input_capacity = root["input_capacity"].asInt();
-  const int label_capacity = root["label_capacity"].asInt();
+  // const int input_capacity = root["input_capacity"].asInt();
+  // const int label_capacity = root["label_capacity"].asInt();
   const int K = root["K"].asInt(), L = root["L"].asInt();
   const int bin_size = root["bin_size"].asInt();
-  const int bucket_num_per_tbl = root["bucket_num_per_tbl"].asInt();
+  // const int bucket_num_per_tbl = root["bucket_num_per_tbl"].asInt();
+  int bucket_num_per_tbl = 1;
+  for (int i = 0; i < K; ++i) {
+    bucket_num_per_tbl += (bin_size - 1) << ((K - 1 - i) * (int)log(bin_size));
+  }
   const int bucket_capacity = root["bucket_capacity"].asInt();
   const int threshold = root["threshold"].asInt();
   const int min_softmax_act_num = root["min_softmax_act_num"].asInt();
@@ -100,18 +104,29 @@ int main(int argc, char *argv[]) {
       root["linked_bucket_num_per_tbl"].asInt();
   const int linked_pool_size = root["linked_pool_size"].asInt();
 
+  const int max_input_num = root["max_input_num"].asInt();
+  const std::vector<int> max_act_nums = jarr_to_vec(root["max_act_nums"]);
+  const int max_label_num = root["max_label_num"].asInt();
+
+  const int input_capacity = max_input_num * max_batch_size;
+  const int label_capacity = max_label_num * max_batch_size;
+  std::vector<int> node_capacity_per_layer(node_num_per_layer.size());
+  for (int i = 0; i < node_num_per_layer.size(); ++i) {
+    node_capacity_per_layer[i] = max_act_nums[i] * max_batch_size;
+  }
+
   Network network(node_num_per_layer, node_capacity_per_layer, input_size,
                   max_batch_size, input_capacity, label_capacity, K, L,
                   bin_size, bucket_num_per_tbl, bucket_capacity, threshold,
                   min_softmax_act_num, tbl_num_per_tile, tbl_num_per_thread,
                   linked_bucket_num_per_tbl, linked_pool_size);
 
-  const std::vector<int> max_act_nums = jarr_to_vec(root["max_act_nums"]);
-  const int max_label_num = root["max_label_num"].asInt();
   const float lr = root["lr"].asFloat();
   const float BETA1 = root["BETA1"].asFloat();
   const float BETA2 = root["BETA2"].asFloat();
-  const int rebuild_period = root["rebuild_period"].asInt();
+  const int rebuild_period = root["rebuild_period"].asInt() / max_batch_size;
+  const int reshuffle_period =
+      root["reshuffle_period"].asInt() / max_batch_size;
   const int thread_num = root["thread_num"].asInt();
   const int epoch_num = root["epoch_num"].asInt();
 
@@ -149,14 +164,15 @@ int main(int argc, char *argv[]) {
 
       const float tmplr =
           lr * sqrt((1 - pow(BETA2, cnt + 1))) / (1 - pow(BETA1, cnt + 1));
-      const bool rebuild = cnt % 5 == 4;
+      const bool rebuild = (cnt + 1) % rebuild_period == 0;
+      const bool reshuffle = (cnt + 1) % reshuffle_period == 0;
 
       timer.start();
 
       network.train(h_cmprs_input_nodes, h_cmprs_input_vals,
                     h_cmprs_input_offsets, h_cmprs_labels,
                     h_cmprs_label_offsets, max_act_nums, batch_size, tmplr,
-                    max_label_num, thread_num, rebuild);
+                    max_label_num, thread_num, rebuild, reshuffle);
 
       tot_time += timer.record("[BATCH " + std::to_string(cnt) + "] ");
 
@@ -164,7 +180,7 @@ int main(int argc, char *argv[]) {
       // if (cnt > 10) break;
 
     } while (batch_size == max_batch_size);
-    network.rebuild();
+    // network.rebuild(false);
 
     printf("Current elapsed time %f ms\n", tot_time);
 

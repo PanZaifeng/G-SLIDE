@@ -20,7 +20,7 @@ SoftmaxLayer::SoftmaxLayer(const int prev_node_num, const int node_num,
 
   GPUTimer timer;
   timer.start();
-  lsh_tbls_ptr->build(d_weights);
+  lsh_tbls_ptr->build(d_weights, true);
   timer.record("[Build LSH Table] ");
 
   CUBLAS_CHECK(cublasCreate(&handle));

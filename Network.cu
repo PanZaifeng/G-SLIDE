@@ -96,7 +96,8 @@ void Network::train(const std::vector<int> &h_cmprs_input_nodes,
                     const std::vector<int> &h_cmprs_label_offsets,
                     const std::vector<int> &max_act_nums, const int batch_size,
                     const float lr, const int max_label_num,
-                    const int thread_num, const bool rebuild) {
+                    const int thread_num, const bool rebuild,
+                    const bool reshuffle) {
   GPUTimer timer;
 
   csc_inputs.extract_from(h_cmprs_input_nodes, h_cmprs_input_vals,
@@ -144,8 +145,8 @@ void Network::train(const std::vector<int> &h_cmprs_input_nodes,
   softmax_layer->update_biases(thread_num, lr);
   // timer.record("[UPDATE " + std::to_string(layer_num - 1) + "] ");
 
-  if (rebuild) {
-    softmax_layer->rebuild();
+  if (rebuild || reshuffle) {
+    softmax_layer->rebuild(reshuffle);
     // timer.record("[REBUILD] ");
   }
 

@@ -81,9 +81,12 @@ void LSH::shuffle_rand() {
                       d_rand_node_keys + node_num, d_rand_nodes);
 }
 
-void LSH::build(const float *d_weights_rowmajor) {
-  shuffle_bins();
-  shuffle_rand();
+void LSH::build(const float *d_weights_rowmajor, const bool reshuffle) {
+  if (reshuffle) {
+    shuffle_bins();
+    shuffle_rand();
+  }
+  
   CUDA_CHECK(
       cudaMemset(d_bucket_sizes, 0, sizeof(int) * L * bucket_num_per_tbl));
 

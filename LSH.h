@@ -45,7 +45,7 @@ class LSH {
   void shuffle_bins();
   void shuffle_rand();
 
-  void build(const float *d_weights_rowmajor);
+  void build(const float *d_weights_rowmajor, const bool reshuffle);
 
   void query_act_nodes(const CscActNodes &csc_inputs,
                        const CscActNodes &cmprs_labels, const int batch_size,

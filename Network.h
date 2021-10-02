@@ -64,7 +64,7 @@ class Network {
              const std::vector<int> &h_cmprs_label_offsets,
              const std::vector<int> &max_act_nums, const int batch_size,
              const float lr, const int max_label_num, const int thread_num,
-             const bool rebuild);
+             const bool rebuild, const bool reshuffle);
 
-  void rebuild() { softmax_layer->rebuild(); }
+  void rebuild(const bool reshuffle) { softmax_layer->rebuild(reshuffle); }
 };

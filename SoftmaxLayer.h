@@ -42,5 +42,7 @@ class SoftmaxLayer : public Layer {
   void bp(Layer &prev_layer, const int batch_size, const int thread_num,
           const int max_act_num);
 
-  void rebuild() { lsh_tbls_ptr->build(d_weights); }
+  void rebuild(const bool reshuffle) {
+    lsh_tbls_ptr->build(d_weights, reshuffle);
+  }
 };
