@@ -58,7 +58,7 @@ __forceinline__ __device__ float block_max(float val) {
   __syncthreads();
 
   if (wid == 0) {
-    val = (threadIdx.x < blockDim.x / warpSize) ? s_max_buff[lane] : 0.;
+    val = (threadIdx.x < blockDim.x / warpSize) ? s_max_buff[lane] : -FLT_MAX;
     val = warp_max(val);
   }
 
@@ -222,7 +222,7 @@ __global__ void softmax_fwd_bp_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + 0.0000001);
+    const float val = s_out_vals[s_out_idx] / s_sum;
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -325,7 +325,7 @@ __global__ void softmax_fwd_bp_all_sm_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + 0.0000001);
+    const float val = s_out_vals[s_out_idx] / s_sum;
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -429,7 +429,7 @@ __global__ void softmax_fwd_bp_rowmajor_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + 0.0000001);
+    const float val = s_out_vals[s_out_idx] / s_sum;
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -532,7 +532,7 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + 0.0000001);
+    const float val = s_out_vals[s_out_idx] / s_sum;
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -628,7 +628,7 @@ __global__ void softmax_fwd_rowmajor_knl(const CscActNodes csc_inputs,
 
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + 0.0000001);
+    const float val = s_out_vals[s_out_idx] / s_sum;
     d_out_val_col[s_out_idx] = val;
   }
 }
