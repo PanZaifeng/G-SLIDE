@@ -13,6 +13,8 @@
 #define BETA2 0.999
 #define EPS 0.00000001
 
+#define MAX_INIT 0.0
+
 __forceinline__ __device__ float warp_reduce(float val) {
   for (int offset = warpSize / 2; offset > 0; offset /= 2)
     val += __shfl_down_sync(0xFFFFFFFF, val, offset);
@@ -58,7 +60,7 @@ __forceinline__ __device__ float block_max(float val) {
   __syncthreads();
 
   if (wid == 0) {
-    val = (threadIdx.x < blockDim.x / warpSize) ? s_max_buff[lane] : -FLT_MAX;
+    val = (threadIdx.x < blockDim.x / warpSize) ? s_max_buff[lane] : MAX_INIT;
     val = warp_max(val);
   }
 
@@ -193,7 +195,7 @@ __global__ void softmax_fwd_bp_knl(
   }
 
   __shared__ float s_max;
-  float thread_max = -FLT_MAX;
+  float thread_max = MAX_INIT;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
     thread_max = max(thread_max, s_out_vals[s_out_idx]);
   }
@@ -222,7 +224,7 @@ __global__ void softmax_fwd_bp_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / s_sum;
+    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -296,7 +298,7 @@ __global__ void softmax_fwd_bp_all_sm_knl(
   }
 
   __shared__ float s_max;
-  float thread_max = -FLT_MAX;
+  float thread_max = MAX_INIT;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
     thread_max = max(thread_max, s_out_vals[s_out_idx]);
   }
@@ -325,7 +327,7 @@ __global__ void softmax_fwd_bp_all_sm_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / s_sum;
+    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -400,7 +402,7 @@ __global__ void softmax_fwd_bp_rowmajor_knl(
   }
 
   __shared__ float s_max;
-  float thread_max = -FLT_MAX;
+  float thread_max = MAX_INIT;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
     thread_max = max(thread_max, s_out_vals[s_out_idx]);
   }
@@ -429,7 +431,7 @@ __global__ void softmax_fwd_bp_rowmajor_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / s_sum;
+    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -503,7 +505,7 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
   }
 
   __shared__ float s_max;
-  float thread_max = -FLT_MAX;
+  float thread_max = MAX_INIT;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
     thread_max = max(thread_max, s_out_vals[s_out_idx]);
   }
@@ -532,7 +534,7 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / s_sum;
+    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
     const int out_node = s_out_nodes[s_out_idx];
     d_out_val_col[s_out_idx] = val;
 
@@ -600,7 +602,7 @@ __global__ void softmax_fwd_rowmajor_knl(const CscActNodes csc_inputs,
   }
 
   __shared__ float s_max;
-  float thread_max = -FLT_MAX;
+  float thread_max = MAX_INIT;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
     thread_max = max(thread_max, s_out_vals[s_out_idx]);
   }
@@ -628,7 +630,7 @@ __global__ void softmax_fwd_rowmajor_knl(const CscActNodes csc_inputs,
 
   float *d_out_val_col = csc_outputs.d_vals + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / s_sum;
+    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
     d_out_val_col[s_out_idx] = val;
   }
 }
@@ -664,7 +666,7 @@ __global__ void softmax_fwd_rowmajor_no_sm_knl(const CscActNodes csc_inputs,
   }
 
   __shared__ float s_max;
-  float thread_max = -FLT_MAX;
+  float thread_max = MAX_INIT;
   FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
     thread_max = max(thread_max, csc_outputs.d_vals[out_idx]);
   }
