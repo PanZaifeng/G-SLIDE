@@ -55,8 +55,7 @@ void SoftmaxLayer::forward(const Layer &prev_layer, const int batch_size,
                            const int thread_num, const int max_act_num) {
   assert(prev_layer.node_num == prev_node_num);
 
-  lsh_tbls_ptr->query_act_nodes(prev_layer.csc_acts, cmprs_labels, batch_size,
-                                csc_acts);
+  lsh_tbls_ptr->query_act_nodes(prev_layer.csc_acts, batch_size, csc_acts);
 
   const int smem_size =
       (sizeof(int) + sizeof(float)) * (thread_num + max_act_num);
