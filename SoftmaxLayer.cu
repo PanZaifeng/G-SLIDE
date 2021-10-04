@@ -15,8 +15,9 @@ SoftmaxLayer::SoftmaxLayer(const int prev_node_num, const int node_num,
     : Layer(prev_node_num, node_num, max_batch_size, node_capacity) {
   lsh_tbls_ptr = std::make_shared<LSH>(
       node_num, prev_node_num, max_batch_size, K, L, bin_size,
-      bucket_num_per_tbl, bucket_capacity, threshold, min_act_num, tbl_num_per_tile,
-      tbl_num_per_thread, linked_bucket_num_per_tbl, linked_pool_size);
+      bucket_num_per_tbl, bucket_capacity, threshold, min_act_num,
+      tbl_num_per_tile, tbl_num_per_thread, linked_bucket_num_per_tbl,
+      linked_pool_size);
 
   GPUTimer timer;
   timer.start();
@@ -53,6 +54,9 @@ void SoftmaxLayer::forward(const Layer &prev_layer,
 void SoftmaxLayer::forward(const Layer &prev_layer, const int batch_size,
                            const int thread_num, const int max_act_num) {
   assert(prev_layer.node_num == prev_node_num);
+
+  lsh_tbls_ptr->query_act_nodes(prev_layer.csc_acts, cmprs_labels, batch_size,
+                                csc_acts);
 
   const int smem_size =
       (sizeof(int) + sizeof(float)) * (thread_num + max_act_num);
