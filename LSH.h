@@ -15,6 +15,7 @@ class LSH {
   const int K, L;
   const int bin_size;
   const int tot_elem_num;
+  const int ceil_elem_num;
   const int tbl_num_per_tile;
   const int tbl_num_per_thread;
 

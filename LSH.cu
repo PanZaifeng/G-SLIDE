@@ -23,6 +23,8 @@ LSH::LSH(const int node_num, const int prev_node_num, const int max_batch_size,
       bucket_capacity(bucket_capacity),
       min_act_num(min_act_num),
       tot_elem_num(K * L * bin_size),
+      ceil_elem_num((K * L * bin_size + prev_node_num - 1) / prev_node_num *
+                    prev_node_num),
       tbl_num_per_tile(tbl_num_per_tile),
       tbl_num_per_thread(tbl_num_per_thread),
       cmprs_gathered(L * max_batch_size, bucket_capacity * L * max_batch_size,
@@ -30,12 +32,13 @@ LSH::LSH(const int node_num, const int prev_node_num, const int max_batch_size,
       multi_linked_htables(max_batch_size, linked_bucket_num_per_tbl,
                            linked_pool_size, threshold) {
   CUDA_CHECK(
-      cudaMallocManaged(&d_rand_keys, sizeof(unsigned int) * tot_elem_num));
-  CUDA_CHECK(cudaMalloc(&d_bins, sizeof(int) * tot_elem_num));
+      cudaMallocManaged(&d_rand_keys, sizeof(unsigned int) * ceil_elem_num));
+  CUDA_CHECK(cudaMalloc(&d_bins, sizeof(int) * ceil_elem_num));
 
   const int thread_num = 128;
-  const int block_num = (tot_elem_num + thread_num - 1) / thread_num;
-  init_bins_knl<<<block_num, thread_num>>>(d_bins, prev_node_num, tot_elem_num);
+  const int block_num = (ceil_elem_num + thread_num - 1) / thread_num;
+  init_bins_knl<<<block_num, thread_num>>>(d_bins, prev_node_num,
+                                           ceil_elem_num);
 
   CUDA_CHECK(cudaMallocManaged(&d_rand_node_keys, sizeof(int) * node_num));
   CUDA_CHECK(cudaMalloc(&d_rand_nodes, sizeof(int) * node_num));
@@ -65,10 +68,10 @@ LSH::~LSH() {
 
 void LSH::shuffle_bins() {
   const int thread_num = 128;
-  const int block_num = (tot_elem_num + thread_num - 1) / thread_num;
+  const int block_num = (ceil_elem_num + thread_num - 1) / thread_num;
   gen_rand_keys_knl<<<block_num, thread_num>>>(d_rand_keys, rand(),
-                                               prev_node_num, tot_elem_num);
-  thrust::sort_by_key(thrust::device, d_rand_keys, d_rand_keys + tot_elem_num,
+                                               prev_node_num, ceil_elem_num);
+  thrust::sort_by_key(thrust::device, d_rand_keys, d_rand_keys + ceil_elem_num,
                       d_bins);
 }
 
@@ -86,7 +89,7 @@ void LSH::build(const float *d_weights_rowmajor, const bool reshuffle) {
     shuffle_bins();
     shuffle_rand();
   }
-  
+
   CUDA_CHECK(
       cudaMemset(d_bucket_sizes, 0, sizeof(int) * L * bucket_num_per_tbl));
 
