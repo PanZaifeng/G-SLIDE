@@ -693,7 +693,7 @@ __global__ void softmax_fwd_rowmajor_no_sm_knl(const CscActNodes csc_inputs,
   __syncthreads();
 
   FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
-    csc_outputs.d_vals[out_idx] /= s_sum;
+    csc_outputs.d_vals[out_idx] /= (s_sum + EPS);
   }
 }
 
