@@ -3,8 +3,8 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
-#include <iostream>
 #include <cassert>
+#include <iostream>
 
 // need to check idx
 #define FOR_IDX_SYNC(idx, begin, end)                                \
@@ -37,4 +37,12 @@ static inline void cublas_assert(cublasStatus_t code, const char *file,
 
     if (abort_flag) exit(code);
   }
+}
+
+static inline bool is_smem_enough(const void *knl, int thread_num,
+                                  size_t smem_size) {
+  int block_num;
+  CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+      &block_num, knl, thread_num, smem_size));
+  return block_num > 0;
 }

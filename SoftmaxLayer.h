@@ -31,16 +31,13 @@ class SoftmaxLayer : public Layer {
   ~SoftmaxLayer();
 
   void forward(const Layer &prev_layer, const CscActNodes &cmprs_labels,
-               const int batch_size, const int thread_num,
-               const int max_act_num, const int max_label_num);
-
-  void forward(const Layer &prev_layer, const int batch_size,
-               const int thread_num, const int max_act_num);
+               const int batch_size, const int thread_num, const int max_in_num,
+               const int max_out_num, const int max_label_num);
 
   void forward_dense(const Layer &prev_layer, const int batch_size);
 
   void bp(Layer &prev_layer, const int batch_size, const int thread_num,
-          const int max_act_num);
+          const int max_prev_num, const int max_act_num);
 
   void rebuild(const bool reshuffle) {
     lsh_tbls_ptr->build(d_weights, reshuffle);

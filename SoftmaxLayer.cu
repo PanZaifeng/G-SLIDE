@@ -37,31 +37,28 @@ SoftmaxLayer::~SoftmaxLayer() {
 void SoftmaxLayer::forward(const Layer &prev_layer,
                            const CscActNodes &cmprs_labels,
                            const int batch_size, const int thread_num,
-                           const int max_act_num, const int max_label_num) {
+                           const int max_in_num, const int max_out_num,
+                           const int max_label_num) {
   assert(prev_layer.node_num == prev_node_num);
 
   lsh_tbls_ptr->query_act_nodes(prev_layer.csc_acts, cmprs_labels, batch_size,
                                 csc_acts);
 
-  const int smem_size =
-      (sizeof(int) + sizeof(float)) * (thread_num + max_act_num) +
-      sizeof(int) * max_label_num;
-  softmax_fwd_bp_rowmajor_knl<<<batch_size, thread_num, smem_size>>>(
-      prev_layer.csc_acts, d_weights, d_biases, cmprs_labels, prev_node_num,
-      max_act_num, max_label_num, csc_acts, d_cmprs_bp_deltas);
-}
-
-void SoftmaxLayer::forward(const Layer &prev_layer, const int batch_size,
-                           const int thread_num, const int max_act_num) {
-  assert(prev_layer.node_num == prev_node_num);
-
-  lsh_tbls_ptr->query_act_nodes(prev_layer.csc_acts, batch_size, csc_acts);
-
-  const int smem_size =
-      (sizeof(int) + sizeof(float)) * (thread_num + max_act_num);
-  softmax_fwd_rowmajor_knl<<<batch_size, thread_num, smem_size>>>(
-      prev_layer.csc_acts, d_weights, d_biases, prev_node_num, max_act_num,
-      csc_acts);
+  int smem_size = (sizeof(int) + sizeof(float)) * (max_in_num + max_out_num) +
+                  sizeof(int) * max_label_num;
+  if (is_smem_enough((void *)softmax_fwd_bp_rowmajor_all_sm_knl, thread_num,
+                     smem_size)) {
+    softmax_fwd_bp_rowmajor_all_sm_knl<<<batch_size, thread_num, smem_size>>>(
+        prev_layer.csc_acts, d_weights, d_biases, cmprs_labels, prev_node_num,
+        max_in_num, max_out_num, max_label_num, csc_acts, d_cmprs_bp_deltas);
+  } else {
+    smem_size = (sizeof(int) + sizeof(float)) * max_in_num +
+                sizeof(int) * max_label_num;
+    softmax_fwd_bp_rowmajor_slide_out_knl<<<batch_size, thread_num,
+                                            smem_size>>>(
+        prev_layer.csc_acts, d_weights, d_biases, cmprs_labels, prev_node_num,
+        max_in_num, max_label_num, csc_acts, d_cmprs_bp_deltas);
+  }
 }
 
 void SoftmaxLayer::forward_dense(const Layer &prev_layer,
@@ -76,10 +73,19 @@ void SoftmaxLayer::forward_dense(const Layer &prev_layer,
 }
 
 void SoftmaxLayer::bp(Layer &prev_layer, const int batch_size,
-                      const int thread_num, const int max_act_num) {
-  const int smem_size = (sizeof(int) + sizeof(float)) * max_act_num;
-  bp_rowmajor_knl<<<batch_size, thread_num, smem_size>>>(
-      csc_acts, prev_layer.csc_acts, d_weights, d_cmprs_bp_deltas,
-      prev_node_num, max_act_num, prev_layer.d_cmprs_bp_deltas,
-      weight_adam.d_ts, bias_adam.d_ts);
+                      const int thread_num, const int max_prev_num,
+                      const int max_act_num) {
+  int smem_size = (sizeof(int) + sizeof(float)) * max_act_num;
+  if (is_smem_enough((void *)bp_rowmajor_knl, thread_num, smem_size)) {
+    bp_rowmajor_knl<<<batch_size, thread_num, smem_size>>>(
+        csc_acts, prev_layer.csc_acts, d_weights, d_cmprs_bp_deltas,
+        prev_node_num, max_act_num, prev_layer.d_cmprs_bp_deltas,
+        weight_adam.d_ts, bias_adam.d_ts);
+  } else {
+    int smem_size = (sizeof(int) + sizeof(float) * 2) * max_prev_num;
+    bp_rowmajor_slide_knl<<<batch_size, thread_num, smem_size>>>(
+        csc_acts, prev_layer.csc_acts, d_weights, d_cmprs_bp_deltas,
+        prev_node_num, max_prev_num, prev_layer.d_cmprs_bp_deltas,
+        weight_adam.d_ts, bias_adam.d_ts);
+  }
 }

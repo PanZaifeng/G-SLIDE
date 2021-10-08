@@ -117,12 +117,13 @@ void Network::train(const std::vector<int> &h_cmprs_input_nodes,
     // timer.record("[FW " + std::to_string(l) + "] ");
   }
   softmax_layer->forward(*relu_layers.back(), cmprs_labels, batch_size,
-                         thread_num, max_act_nums.back(), max_label_num);
+                         thread_num, *(max_act_nums.end() - 2),
+                         max_act_nums.back(), max_label_num);
   // timer.record("[FW " + std::to_string(layer_num - 1) + "] ");
 
   // backpropagate
   softmax_layer->bp(*relu_layers.back(), batch_size, thread_num,
-                    max_act_nums.back());
+                    *(max_act_nums.end() - 2), max_act_nums.back());
   // timer.record("[BP " + std::to_string(layer_num - 1) + "] ");
   for (int l = relu_layers.size() - 1; l >= 0; --l) {
     if (l == 0) {

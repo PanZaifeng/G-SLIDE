@@ -80,10 +80,12 @@ __global__ void get_dense_acts_knl(CscActNodes csc_acts, const int node_num,
   }
 }
 
-__global__ void relu_fwd_knl(const CscActNodes csc_inputs,
-                             const float *d_weights_colmajor,
-                             const float *d_biases, const int weight_row_num,
-                             const int max_out_num, CscActNodes csc_outputs) {
+__global__ void relu_fwd_slide_in_knl(const CscActNodes csc_inputs,
+                                      const float *d_weights_colmajor,
+                                      const float *d_biases,
+                                      const int weight_row_num,
+                                      const int max_out_num,
+                                      CscActNodes csc_outputs) {
   extern __shared__ char smem[];
   float *s_in_vals = (float *)smem;                        // blockDim.x
   int *s_in_nodes = (int *)(s_in_vals + blockDim.x);       // blockDim.x
@@ -136,214 +138,7 @@ __global__ void relu_fwd_knl(const CscActNodes csc_inputs,
   }
 }
 
-__global__ void softmax_fwd_bp_knl(
-    const CscActNodes csc_inputs, const float *d_weights_colmajor,
-    const float *d_biases, const CscActNodes cmprs_labels,
-    const int weight_row_num, const int max_out_num, const int max_label_num,
-    CscActNodes csc_outputs, float *d_cmprs_bp_deltas) {
-  extern __shared__ char smem[];
-  float *s_in_vals = (float *)smem;                        // blockDim.x
-  int *s_in_nodes = (int *)(s_in_vals + blockDim.x);       // blockDim.x
-  float *s_out_vals = (float *)(s_in_nodes + blockDim.x);  // max_out_num
-  int *s_out_nodes = (int *)(s_out_vals + max_out_num);    // max_out_num
-  int *s_labels = (int *)(s_out_nodes + max_out_num);      // max_label_num
-
-  const int in_begin = csc_inputs.d_offsets[blockIdx.x];
-  const int in_end = csc_inputs.d_offsets[blockIdx.x + 1];
-  const int out_begin = csc_outputs.d_offsets[blockIdx.x];
-  const int out_end = csc_outputs.d_offsets[blockIdx.x + 1];
-  const int out_size = out_end - out_begin;
-  const int label_begin = cmprs_labels.d_offsets[blockIdx.x];
-  const int label_end = cmprs_labels.d_offsets[blockIdx.x + 1];
-  const int label_size = label_end - label_begin;
-
-  assert(out_size <= max_out_num);
-  assert(label_size <= max_label_num);
-
-  FOR_IDX_ASYNC(s_label_idx, 0, label_size) {
-    s_labels[s_label_idx] = cmprs_labels.d_nodes[label_begin + s_label_idx];
-  }
-
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const int out_node = csc_outputs.d_nodes[out_begin + s_out_idx];
-    s_out_nodes[s_out_idx] = out_node;
-    s_out_vals[s_out_idx] = d_biases[out_node];
-  }
-
-  FOR_OFFSET(in_offset, in_begin, in_end) {
-    const int in_idx = in_offset + threadIdx.x;
-    if (in_idx < in_end) {
-      s_in_nodes[threadIdx.x] = csc_inputs.d_nodes[in_idx];
-      s_in_vals[threadIdx.x] = csc_inputs.d_vals[in_idx];
-    }
-    __syncthreads();
-
-    FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-      const int out_node = s_out_nodes[s_out_idx];
-      float psum = 0.;
-      for (int s_in_idx = 0;
-           s_in_idx < blockDim.x && in_offset + s_in_idx < in_end; ++s_in_idx) {
-        const int in_node = s_in_nodes[s_in_idx];
-        const float in_val = s_in_vals[s_in_idx];
-        const float weight =
-            d_weights_colmajor[in_node * weight_row_num + out_node];
-        psum += in_val * weight;
-      }
-      s_out_vals[s_out_idx] += psum;
-    }
-    __syncthreads();
-  }
-
-  __shared__ float s_max;
-  float thread_max = MAX_INIT;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    thread_max = max(thread_max, s_out_vals[s_out_idx]);
-  }
-
-  thread_max =
-      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
-
-  if (threadIdx.x == 0) s_max = thread_max;
-  __syncthreads();
-
-  __shared__ float s_sum;
-  float thread_sum = 0.;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    float val = __expf(s_out_vals[s_out_idx] - s_max);
-    // float val = exp(s_out_vals[s_out_idx] - s_max);
-    s_out_vals[s_out_idx] = val;
-    thread_sum += val;
-  }
-
-  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
-                                      : block_reduce(thread_sum);
-
-  if (threadIdx.x == 0) s_sum = thread_sum;
-  __syncthreads();
-
-  float *d_out_val_col = csc_outputs.d_vals + out_begin;
-  float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
-    const int out_node = s_out_nodes[s_out_idx];
-    d_out_val_col[s_out_idx] = val;
-
-    bool is_in_label = false;
-    for (int i = 0; i < label_size; ++i) {
-      is_in_label = is_in_label || (s_labels[i] == out_node);
-    }
-
-    float bp_delta = -val;
-    if (is_in_label) bp_delta += 1.0 / label_size;
-    bp_delta /= gridDim.x;
-    d_bp_delta_col[s_out_idx] = bp_delta;
-  }
-}
-
-__global__ void softmax_fwd_bp_all_sm_knl(
-    const CscActNodes csc_inputs, const float *d_weights_colmajor,
-    const float *d_biases, const CscActNodes cmprs_labels,
-    const int weight_row_num, const int max_in_num, const int max_out_num,
-    const int max_label_num, CscActNodes csc_outputs,
-    float *d_cmprs_bp_deltas) {
-  extern __shared__ char smem[];
-  float *s_in_vals = (float *)smem;                        // max_in_num
-  int *s_in_nodes = (int *)(s_in_vals + max_in_num);       // max_in_num
-  float *s_out_vals = (float *)(s_in_nodes + max_in_num);  // max_out_num
-  int *s_out_nodes = (int *)(s_out_vals + max_out_num);    // max_out_num
-  int *s_labels = (int *)(s_out_nodes + max_out_num);      // max_label_num
-
-  const int in_begin = csc_inputs.d_offsets[blockIdx.x];
-  const int in_end = csc_inputs.d_offsets[blockIdx.x + 1];
-  const int in_size = in_end - in_begin;
-  const int out_begin = csc_outputs.d_offsets[blockIdx.x];
-  const int out_end = csc_outputs.d_offsets[blockIdx.x + 1];
-  const int out_size = out_end - out_begin;
-  const int label_begin = cmprs_labels.d_offsets[blockIdx.x];
-  const int label_end = cmprs_labels.d_offsets[blockIdx.x + 1];
-  const int label_size = label_end - label_begin;
-
-  assert(in_size <= max_in_num);
-  assert(out_size <= max_out_num);
-  assert(label_size <= max_label_num);
-
-  FOR_IDX_ASYNC(s_label_idx, 0, label_size) {
-    s_labels[s_label_idx] = cmprs_labels.d_nodes[label_begin + s_label_idx];
-  }
-
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const int out_node = csc_outputs.d_nodes[out_begin + s_out_idx];
-    s_out_nodes[s_out_idx] = out_node;
-    s_out_vals[s_out_idx] = d_biases[out_node];
-  }
-
-  FOR_IDX_ASYNC(in_idx, in_begin, in_end) {
-    const int s_in_idx = in_idx - in_begin;
-    s_in_nodes[s_in_idx] = csc_inputs.d_nodes[in_idx];
-    s_in_vals[threadIdx.x] = csc_inputs.d_vals[in_idx];
-  }
-  __syncthreads();
-
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const int out_node = s_out_nodes[s_out_idx];
-    float psum = 0.;
-    for (int s_in_idx = 0; s_in_idx < in_size; ++s_in_idx) {
-      const int in_node = s_in_nodes[s_in_idx];
-      const float in_val = s_in_vals[s_in_idx];
-      const float weight =
-          d_weights_colmajor[in_node * weight_row_num + out_node];
-      psum += in_val * weight;
-    }
-    s_out_vals[s_out_idx] += psum;
-  }
-
-  __shared__ float s_max;
-  float thread_max = MAX_INIT;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    thread_max = max(thread_max, s_out_vals[s_out_idx]);
-  }
-
-  thread_max =
-      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
-
-  if (threadIdx.x == 0) s_max = thread_max;
-  __syncthreads();
-
-  __shared__ float s_sum;
-  float thread_sum = 0.;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    float val = __expf(s_out_vals[s_out_idx] - s_max);
-    // float val = exp(s_out_vals[s_out_idx] - s_max);
-    s_out_vals[s_out_idx] = val;
-    thread_sum += val;
-  }
-
-  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
-                                      : block_reduce(thread_sum);
-
-  if (threadIdx.x == 0) s_sum = thread_sum;
-  __syncthreads();
-
-  float *d_out_val_col = csc_outputs.d_vals + out_begin;
-  float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
-    const int out_node = s_out_nodes[s_out_idx];
-    d_out_val_col[s_out_idx] = val;
-
-    bool is_in_label = false;
-    for (int i = 0; i < label_size; ++i) {
-      is_in_label = is_in_label || (s_labels[i] == out_node);
-    }
-
-    float bp_delta = -val;
-    if (is_in_label) bp_delta += 1.0 / label_size;
-    bp_delta /= gridDim.x;
-    d_bp_delta_col[s_out_idx] = bp_delta;
-  }
-}
-
-__global__ void softmax_fwd_bp_rowmajor_knl(
+__global__ void softmax_fwd_bp_rowmajor_slide_in_knl(
     const CscActNodes csc_inputs, const float *d_weights_rowmajor,
     const float *d_biases, const CscActNodes cmprs_labels,
     const int weight_col_num, const int max_out_num, const int max_label_num,
@@ -409,7 +204,6 @@ __global__ void softmax_fwd_bp_rowmajor_knl(
 
   thread_max =
       blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
-
   if (threadIdx.x == 0) s_max = thread_max;
   __syncthreads();
 
@@ -424,16 +218,14 @@ __global__ void softmax_fwd_bp_rowmajor_knl(
 
   thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
                                       : block_reduce(thread_sum);
-
   if (threadIdx.x == 0) s_sum = thread_sum;
   __syncthreads();
 
-  float *d_out_val_col = csc_outputs.d_vals + out_begin;
-  float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
+    const int out_idx = s_out_idx + out_begin;
     const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
     const int out_node = s_out_nodes[s_out_idx];
-    d_out_val_col[s_out_idx] = val;
+    csc_outputs.d_vals[out_idx] = val;
 
     bool is_in_label = false;
     for (int i = 0; i < label_size; ++i) {
@@ -443,7 +235,92 @@ __global__ void softmax_fwd_bp_rowmajor_knl(
     float bp_delta = -val;
     if (is_in_label) bp_delta += 1.0 / label_size;
     bp_delta /= gridDim.x;
-    d_bp_delta_col[s_out_idx] = bp_delta;
+    d_cmprs_bp_deltas[out_idx] = bp_delta;
+  }
+}
+
+__global__ void softmax_fwd_bp_rowmajor_slide_out_knl(
+    const CscActNodes csc_inputs, const float *d_weights_rowmajor,
+    const float *d_biases, const CscActNodes cmprs_labels,
+    const int weight_col_num, const int max_in_num, const int max_label_num,
+    CscActNodes csc_outputs, float *d_cmprs_bp_deltas) {
+  extern __shared__ char smem[];
+  float *s_in_vals = (float *)smem;                   // max_in_num
+  int *s_in_nodes = (int *)(s_in_vals + max_in_num);  // max_in_num
+  int *s_labels = (int *)(s_in_nodes + max_in_num);   // max_label_num
+
+  const int in_begin = csc_inputs.d_offsets[blockIdx.x];
+  const int in_end = csc_inputs.d_offsets[blockIdx.x + 1];
+  const int in_size = in_end - in_begin;
+  const int out_begin = csc_outputs.d_offsets[blockIdx.x];
+  const int out_end = csc_outputs.d_offsets[blockIdx.x + 1];
+  const int label_begin = cmprs_labels.d_offsets[blockIdx.x];
+  const int label_end = cmprs_labels.d_offsets[blockIdx.x + 1];
+  const int label_size = label_end - label_begin;
+
+  assert(in_size <= max_in_num);
+  assert(label_size <= max_label_num);
+
+  FOR_IDX_ASYNC(in_idx, in_begin, in_end) {
+    const int s_in_idx = in_idx - in_begin;
+    s_in_nodes[s_in_idx] = csc_inputs.d_nodes[in_idx];
+    s_in_vals[s_in_idx] = csc_inputs.d_vals[in_idx];
+  }
+
+  FOR_IDX_ASYNC(s_label_idx, 0, label_size) {
+    s_labels[s_label_idx] = cmprs_labels.d_nodes[label_begin + s_label_idx];
+  }
+  __syncthreads();
+
+  float thread_max = MAX_INIT;
+  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
+    const int out_node = csc_outputs.d_nodes[out_idx];
+    float psum = d_biases[out_node];
+    for (int s_in_idx = 0; s_in_idx < in_size; ++s_in_idx) {
+      const int in_node = s_in_nodes[s_in_idx];
+      const float in_val = s_in_vals[s_in_idx];
+      const float weight =
+          d_weights_rowmajor[out_node * weight_col_num + in_node];
+      psum += in_val * weight;
+    }
+    csc_outputs.d_vals[out_idx] = psum;
+    thread_max = max(thread_max, psum);
+  }
+
+  __shared__ float s_max;
+  thread_max =
+      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
+  if (threadIdx.x == 0) s_max = thread_max;
+  __syncthreads();
+
+  __shared__ float s_sum;
+  float thread_sum = 0.;
+  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
+    float val = __expf(csc_outputs.d_vals[out_idx] - s_max);
+    // float val = exp(csc_outputs.d_vals[out_idx] - s_max);
+    csc_outputs.d_vals[out_idx] = val;
+    thread_sum += val;
+  }
+
+  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
+                                      : block_reduce(thread_sum);
+  if (threadIdx.x == 0) s_sum = thread_sum;
+  __syncthreads();
+
+  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
+    const float val = csc_outputs.d_vals[out_idx] / (s_sum + EPS);
+    const int out_node = csc_outputs.d_nodes[out_idx];
+    csc_outputs.d_vals[out_idx] = val;
+
+    bool is_in_label = false;
+    for (int i = 0; i < label_size; ++i) {
+      is_in_label = is_in_label || (s_labels[i] == out_node);
+    }
+
+    float bp_delta = -val;
+    if (is_in_label) bp_delta += 1.0 / label_size;
+    bp_delta /= gridDim.x;
+    d_cmprs_bp_deltas[out_idx] = bp_delta;
   }
 }
 
@@ -487,13 +364,15 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
   FOR_IDX_ASYNC(in_idx, in_begin, in_end) {
     const int s_in_idx = in_idx - in_begin;
     s_in_nodes[s_in_idx] = csc_inputs.d_nodes[in_idx];
-    s_in_vals[threadIdx.x] = csc_inputs.d_vals[in_idx];
+    s_in_vals[s_in_idx] = csc_inputs.d_vals[in_idx];
   }
   __syncthreads();
 
+  float thread_max = MAX_INIT;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const int out_node = s_out_nodes[s_out_idx];
-    float psum = 0.;
+    const int out_node = csc_outputs.d_nodes[out_begin + s_out_idx];
+    s_out_nodes[s_out_idx] = out_node;
+    float psum = d_biases[out_node];
     for (int s_in_idx = 0; s_in_idx < in_size; ++s_in_idx) {
       const int in_node = s_in_nodes[s_in_idx];
       const float in_val = s_in_vals[s_in_idx];
@@ -501,18 +380,13 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
           d_weights_rowmajor[out_node * weight_col_num + in_node];
       psum += in_val * weight;
     }
-    s_out_vals[s_out_idx] += psum;
+    s_out_vals[s_out_idx] = psum;
+    thread_max = max(thread_max, psum);
   }
 
   __shared__ float s_max;
-  float thread_max = MAX_INIT;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    thread_max = max(thread_max, s_out_vals[s_out_idx]);
-  }
-
   thread_max =
       blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
-
   if (threadIdx.x == 0) s_max = thread_max;
   __syncthreads();
 
@@ -527,16 +401,14 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
 
   thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
                                       : block_reduce(thread_sum);
-
   if (threadIdx.x == 0) s_sum = thread_sum;
   __syncthreads();
 
-  float *d_out_val_col = csc_outputs.d_vals + out_begin;
-  float *d_bp_delta_col = d_cmprs_bp_deltas + out_begin;
   FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
+    const int out_idx = s_out_idx + out_begin;
     const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
     const int out_node = s_out_nodes[s_out_idx];
-    d_out_val_col[s_out_idx] = val;
+    csc_outputs.d_vals[out_idx] = val;
 
     bool is_in_label = false;
     for (int i = 0; i < label_size; ++i) {
@@ -546,154 +418,7 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
     float bp_delta = -val;
     if (is_in_label) bp_delta += 1.0 / label_size;
     bp_delta /= gridDim.x;
-    d_bp_delta_col[s_out_idx] = bp_delta;
-  }
-}
-
-__global__ void softmax_fwd_rowmajor_knl(const CscActNodes csc_inputs,
-                                         const float *d_weights_rowmajor,
-                                         const float *d_biases,
-                                         const int weight_col_num,
-                                         const int max_out_num,
-                                         CscActNodes csc_outputs) {
-  extern __shared__ char smem[];
-  float *s_in_vals = (float *)smem;                        // blockDim.x
-  int *s_in_nodes = (int *)(s_in_vals + blockDim.x);       // blockDim.x
-  float *s_out_vals = (float *)(s_in_nodes + blockDim.x);  // max_out_num
-  int *s_out_nodes = (int *)(s_out_vals + max_out_num);    // max_out_num
-
-  const int in_begin = csc_inputs.d_offsets[blockIdx.x];
-  const int in_end = csc_inputs.d_offsets[blockIdx.x + 1];
-  const int out_begin = csc_outputs.d_offsets[blockIdx.x];
-  const int out_end = csc_outputs.d_offsets[blockIdx.x + 1];
-  const int out_size = out_end - out_begin;
-
-  assert(out_size <= max_out_num);
-
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const int out_node = csc_outputs.d_nodes[out_begin + s_out_idx];
-    s_out_nodes[s_out_idx] = out_node;
-    s_out_vals[s_out_idx] = d_biases[out_node];
-  }
-
-  FOR_OFFSET(in_offset, in_begin, in_end) {
-    const int in_idx = in_offset + threadIdx.x;
-    if (in_idx < in_end) {
-      const int in_node = csc_inputs.d_nodes[in_idx];
-      s_in_nodes[threadIdx.x] = in_node;
-      s_in_vals[threadIdx.x] = csc_inputs.d_vals[in_idx];
-    }
-    __syncthreads();
-
-    FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-      const int out_node = s_out_nodes[s_out_idx];
-      float psum = 0.;
-      for (int s_in_idx = 0;
-           s_in_idx < blockDim.x && in_offset + s_in_idx < in_end; ++s_in_idx) {
-        const int in_node = s_in_nodes[s_in_idx];
-        const float in_val = s_in_vals[s_in_idx];
-        const float weight =
-            d_weights_rowmajor[out_node * weight_col_num + in_node];
-        psum += in_val * weight;
-      }
-      s_out_vals[s_out_idx] += psum;
-    }
-    __syncthreads();
-  }
-
-  __shared__ float s_max;
-  float thread_max = MAX_INIT;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    thread_max = max(thread_max, s_out_vals[s_out_idx]);
-  }
-
-  thread_max =
-      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
-
-  if (threadIdx.x == 0) s_max = thread_max;
-  __syncthreads();
-
-  __shared__ float s_sum;
-  float thread_sum = 0.;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    float val = __expf(s_out_vals[s_out_idx] - s_max);
-    // float val = exp(s_out_vals[s_out_idx] - s_max);
-    s_out_vals[s_out_idx] = val;
-    thread_sum += val;
-  }
-
-  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
-                                      : block_reduce(thread_sum);
-
-  if (threadIdx.x == 0) s_sum = thread_sum;
-  __syncthreads();
-
-  float *d_out_val_col = csc_outputs.d_vals + out_begin;
-  FOR_IDX_ASYNC(s_out_idx, 0, out_size) {
-    const float val = s_out_vals[s_out_idx] / (s_sum + EPS);
-    d_out_val_col[s_out_idx] = val;
-  }
-}
-
-__global__ void softmax_fwd_rowmajor_no_sm_knl(const CscActNodes csc_inputs,
-                                               const float *d_weights_rowmajor,
-                                               const float *d_biases,
-                                               const int weight_col_num,
-                                               CscActNodes csc_outputs) {
-  const int in_begin = csc_inputs.d_offsets[blockIdx.x];
-  const int in_end = csc_inputs.d_offsets[blockIdx.x + 1];
-  const int out_begin = csc_outputs.d_offsets[blockIdx.x];
-  const int out_end = csc_outputs.d_offsets[blockIdx.x + 1];
-  // const int out_size = out_end - out_begin;
-
-  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
-    const int out_node = csc_outputs.d_nodes[out_idx];
-    csc_outputs.d_vals[out_idx] = d_biases[out_node];
-  }
-  __syncthreads();
-
-  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
-    const int out_node = csc_outputs.d_nodes[out_idx];
-    float psum = 0.;
-    for (int in_idx = in_begin; in_idx < in_end; ++in_idx) {
-      const int in_node = csc_inputs.d_nodes[in_idx];
-      const float in_val = csc_inputs.d_vals[in_idx];
-      const float weight =
-          d_weights_rowmajor[out_node * weight_col_num + in_node];
-      psum += in_val * weight;
-    }
-    csc_outputs.d_vals[out_idx] += psum;
-  }
-
-  __shared__ float s_max;
-  float thread_max = MAX_INIT;
-  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
-    thread_max = max(thread_max, csc_outputs.d_vals[out_idx]);
-  }
-
-  thread_max =
-      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
-
-  if (threadIdx.x == 0) s_max = thread_max;
-  __syncthreads();
-
-  __shared__ float s_sum;
-  float thread_sum = 0.;
-  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
-    float val = __expf(csc_outputs.d_vals[out_idx] - s_max);
-    // float val = exp(csc_outputs.d_vals[out_idx] - s_max);
-    csc_outputs.d_vals[out_idx] = val;
-    thread_sum += val;
-  }
-
-  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
-                                      : block_reduce(thread_sum);
-
-  if (threadIdx.x == 0) s_sum = thread_sum;
-  __syncthreads();
-
-  FOR_IDX_ASYNC(out_idx, out_begin, out_end) {
-    csc_outputs.d_vals[out_idx] /= (s_sum + EPS);
+    d_cmprs_bp_deltas[out_idx] = bp_delta;
   }
 }
 
@@ -794,6 +519,61 @@ __global__ void bp_rowmajor_knl(const CscActNodes csc_acts,
       prev_bp_delta += d_cmprs_prev_bp_deltas[prev_idx];
     }
     d_cmprs_prev_bp_deltas[prev_idx] = prev_bp_delta;
+  }
+}
+
+__global__ void bp_rowmajor_slide_knl(
+    const CscActNodes csc_acts, const CscActNodes csc_prev,
+    const float *d_weights_rowmajor, const float *d_cmprs_bp_deltas,
+    const int weight_col_num, const int max_prev_num,
+    float *d_cmprs_prev_bp_deltas, float *d_adam_ts, float *d_bias_adam_ts) {
+  extern __shared__ char smem[];
+  float *s_prev_bp_deltas = (float *)smem;                       // max_prev_num
+  int *s_prev_nodes = (int *)(s_prev_bp_deltas + max_prev_num);  // max_prev_num
+  float *s_prev_vals = (float *)(s_prev_nodes + max_prev_num);   // max_prev_num
+
+  const int act_begin = csc_acts.d_offsets[blockIdx.x];
+  const int act_end = csc_acts.d_offsets[blockIdx.x + 1];
+  const int prev_begin = csc_prev.d_offsets[blockIdx.x];
+  const int prev_end = csc_prev.d_offsets[blockIdx.x + 1];
+  const int prev_size = prev_end - prev_begin;
+
+  assert(prev_size <= max_prev_num);
+
+  FOR_IDX_ASYNC(s_prev_idx, 0, prev_size) {
+    const int prev_idx = s_prev_idx + prev_begin;
+    const float prev_val = csc_prev.d_vals[prev_idx];
+    s_prev_nodes[s_prev_idx] = csc_prev.d_nodes[prev_idx];
+    s_prev_vals[s_prev_idx] = prev_val;
+
+    if (prev_val > 0)
+      s_prev_bp_deltas[s_prev_idx] = d_cmprs_prev_bp_deltas[prev_idx];
+    else
+      s_prev_bp_deltas[s_prev_idx] = 0;
+  }
+  __syncthreads();
+
+  FOR_IDX_ASYNC(act_idx, act_begin, act_end) {
+    const int act_node = csc_acts.d_nodes[act_idx];
+    const float bp_delta = d_cmprs_bp_deltas[act_idx];
+    atomicAdd(d_bias_adam_ts + act_node, bp_delta);
+
+    for (int s_prev_idx = 0; s_prev_idx < prev_size; ++s_prev_idx) {
+      const int prev_node = s_prev_nodes[s_prev_idx];
+      const float prev_val = s_prev_vals[s_prev_idx];
+      const int weight_idx = act_node * weight_col_num + prev_node;
+      if (prev_val > 0) {
+        const float weight = d_weights_rowmajor[weight_idx];
+        // seq! -> TODO: parallel reduce
+        atomicAdd(s_prev_bp_deltas + s_prev_idx, bp_delta * weight);
+      }
+      atomicAdd(d_adam_ts + weight_idx, prev_val * bp_delta);
+    }
+  }
+  __syncthreads();
+
+  FOR_IDX_ASYNC(prev_idx, prev_begin, prev_end) {
+    d_cmprs_prev_bp_deltas[prev_idx] = s_prev_bp_deltas[prev_idx - prev_begin];
   }
 }
 

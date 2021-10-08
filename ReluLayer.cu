@@ -11,7 +11,7 @@ void ReluLayer::forward(const Layer &prev_layer, const int batch_size,
 
   const int smem_size =
       (sizeof(int) + sizeof(float)) * (thread_num + max_out_num);
-  relu_fwd_knl<<<batch_size, thread_num, smem_size>>>(
+  relu_fwd_slide_in_knl<<<batch_size, thread_num, smem_size>>>(
       prev_layer.csc_acts, d_weights, d_biases, node_num, max_out_num,
       csc_acts);
 }
@@ -23,7 +23,7 @@ void ReluLayer::forward(const CscActNodes &csc_inputs, const int batch_size,
 
   const int smem_size =
       (sizeof(int) + sizeof(float)) * (thread_num + max_out_num);
-  relu_fwd_knl<<<batch_size, thread_num, smem_size>>>(
+  relu_fwd_slide_in_knl<<<batch_size, thread_num, smem_size>>>(
       csc_inputs, d_weights, d_biases, node_num, max_out_num, csc_acts);
 }
 

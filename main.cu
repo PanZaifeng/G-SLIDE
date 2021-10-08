@@ -100,9 +100,11 @@ int main(int argc, char *argv[]) {
   const int min_softmax_act_num = root["min_softmax_act_num"].asInt();
   const int tbl_num_per_tile = root["tbl_num_per_tile"].asInt();
   const int tbl_num_per_thread = root["tbl_num_per_thread"].asInt();
-  const int linked_bucket_num_per_tbl =
-      root["linked_bucket_num_per_tbl"].asInt();
-  const int linked_pool_size = root["linked_pool_size"].asInt();
+  // const int linked_bucket_num_per_tbl =
+  //     root["linked_bucket_num_per_tbl"].asInt();
+  // const int linked_pool_size = root["linked_pool_size"].asInt();
+  const int linked_bucket_num_per_tbl = bucket_capacity * L * 2;
+  const int linked_pool_size = bucket_capacity * L;
 
   const int max_input_num = root["max_input_num"].asInt();
   const std::vector<int> max_act_nums = jarr_to_vec(root["max_act_nums"]);
