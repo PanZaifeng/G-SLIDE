@@ -28,6 +28,8 @@ __forceinline__ __device__ float block_reduce(float val) {
   const int lane = threadIdx.x - wid * warpSize;
 
   val = warp_reduce(val);
+  if (blockDim.x < warpSize) return val;
+
   if (lane == 0) {
     s_sum_buff[wid] = val;
   }
@@ -54,6 +56,8 @@ __forceinline__ __device__ float block_max(float val) {
   const int lane = threadIdx.x - wid * warpSize;
 
   val = warp_max(val);
+  if (blockDim.x < warpSize) return val;
+
   if (lane == 0) {
     s_max_buff[wid] = val;
   }
@@ -202,8 +206,7 @@ __global__ void softmax_fwd_bp_rowmajor_slide_in_knl(
     thread_max = max(thread_max, s_out_vals[s_out_idx]);
   }
 
-  thread_max =
-      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
+  thread_max = block_max(thread_max);
   if (threadIdx.x == 0) s_max = thread_max;
   __syncthreads();
 
@@ -216,8 +219,7 @@ __global__ void softmax_fwd_bp_rowmajor_slide_in_knl(
     thread_sum += val;
   }
 
-  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
-                                      : block_reduce(thread_sum);
+  thread_sum = block_reduce(thread_sum);
   if (threadIdx.x == 0) s_sum = thread_sum;
   __syncthreads();
 
@@ -288,8 +290,7 @@ __global__ void softmax_fwd_bp_rowmajor_slide_out_knl(
   }
 
   __shared__ float s_max;
-  thread_max =
-      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
+  thread_max = block_max(thread_max);
   if (threadIdx.x == 0) s_max = thread_max;
   __syncthreads();
 
@@ -302,8 +303,7 @@ __global__ void softmax_fwd_bp_rowmajor_slide_out_knl(
     thread_sum += val;
   }
 
-  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
-                                      : block_reduce(thread_sum);
+  thread_sum = block_reduce(thread_sum);
   if (threadIdx.x == 0) s_sum = thread_sum;
   __syncthreads();
 
@@ -385,8 +385,7 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
   }
 
   __shared__ float s_max;
-  thread_max =
-      blockDim.x <= warpSize ? warp_max(thread_max) : block_max(thread_max);
+  thread_max = block_max(thread_max);
   if (threadIdx.x == 0) s_max = thread_max;
   __syncthreads();
 
@@ -399,8 +398,7 @@ __global__ void softmax_fwd_bp_rowmajor_all_sm_knl(
     thread_sum += val;
   }
 
-  thread_sum = blockDim.x <= warpSize ? warp_reduce(thread_sum)
-                                      : block_reduce(thread_sum);
+  thread_sum = block_reduce(thread_sum);
   if (threadIdx.x == 0) s_sum = thread_sum;
   __syncthreads();
 
@@ -545,29 +543,38 @@ __global__ void bp_rowmajor_slide_knl(
     const float prev_val = csc_prev.d_vals[prev_idx];
     s_prev_nodes[s_prev_idx] = csc_prev.d_nodes[prev_idx];
     s_prev_vals[s_prev_idx] = prev_val;
-
-    if (prev_val > 0)
-      s_prev_bp_deltas[s_prev_idx] = d_cmprs_prev_bp_deltas[prev_idx];
-    else
-      s_prev_bp_deltas[s_prev_idx] = 0;
+    s_prev_bp_deltas[s_prev_idx] =
+        prev_val > 0 ? d_cmprs_prev_bp_deltas[prev_idx] : 0;
   }
   __syncthreads();
 
-  FOR_IDX_ASYNC(act_idx, act_begin, act_end) {
-    const int act_node = csc_acts.d_nodes[act_idx];
-    const float bp_delta = d_cmprs_bp_deltas[act_idx];
-    atomicAdd(d_bias_adam_ts + act_node, bp_delta);
+  FOR_IDX_SYNC(act_idx, act_begin, act_end) {
+    int act_node;
+    float bp_delta;
+    if (act_idx < act_end) {
+      act_node = csc_acts.d_nodes[act_idx];
+      bp_delta = d_cmprs_bp_deltas[act_idx];
+      atomicAdd(d_bias_adam_ts + act_node, bp_delta);
+    }
 
+    // TODO: better utilize the bandwidth
     for (int s_prev_idx = 0; s_prev_idx < prev_size; ++s_prev_idx) {
-      const int prev_node = s_prev_nodes[s_prev_idx];
-      const float prev_val = s_prev_vals[s_prev_idx];
-      const int weight_idx = act_node * weight_col_num + prev_node;
-      if (prev_val > 0) {
-        const float weight = d_weights_rowmajor[weight_idx];
-        // seq! -> TODO: parallel reduce
-        atomicAdd(s_prev_bp_deltas + s_prev_idx, bp_delta * weight);
+      int prev_node, weight_idx;
+      float prev_val, thread_inc = 0;
+      if (act_idx < act_end) {
+        prev_node = s_prev_nodes[s_prev_idx];
+        prev_val = s_prev_vals[s_prev_idx];
+        weight_idx = act_node * weight_col_num + prev_node;
+        if (prev_val > 0) {
+          const float weight = d_weights_rowmajor[weight_idx];
+          thread_inc = bp_delta * weight;
+        }
       }
-      atomicAdd(d_adam_ts + weight_idx, prev_val * bp_delta);
+      thread_inc = block_reduce(thread_inc);
+      if (threadIdx.x == 0) s_prev_bp_deltas[s_prev_idx] += thread_inc;
+      if (act_idx < act_end) {
+        atomicAdd(d_adam_ts + weight_idx, prev_val * bp_delta);
+      }
     }
   }
   __syncthreads();
