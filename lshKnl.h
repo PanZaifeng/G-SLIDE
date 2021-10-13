@@ -12,14 +12,13 @@ __global__ void gen_rand_keys_knl(int *d_rand_keys, const int seed,
                                   const int node_num);
 
 // Assumption: prev_node_num is small while node_num is large
-__global__ void init_hash_knl(const int *d_bins,
-                              const float *d_weights_rowmajor,
-                              const int prev_node_num, const int node_num,
-                              const int tot_elem_num, const int L, const int K,
-                              const int bin_size, const int tbl_num_per_tile,
-                              const int bucket_num_per_tbl,
-                              const int bucket_capacity, int *d_buckets,
-                              int *d_bucket_sizes);
+// tt: one thread for each tile
+__global__ void init_hash_tt_knl(
+    const int *d_bins, const float *d_weights_rowmajor, const int prev_node_num,
+    const int node_num, const int tot_elem_num, const int L, const int K,
+    const int bin_size, const int tbl_num_per_tile,
+    const int bucket_num_per_tbl, const int bucket_capacity, int *d_buckets,
+    int *d_bucket_sizes);
 
 // Assumption: prev_node_num is small while node_num is large
 __global__ void init_hash_knl(
@@ -28,6 +27,14 @@ __global__ void init_hash_knl(
     const int bin_size, const int tbl_num_per_tile,
     const int tbl_num_per_thread, const int bucket_num_per_tbl,
     const int bucket_capacity, int *d_buckets, int *d_bucket_sizes);
+
+// No shared memory for weights
+__global__ void init_hash_no_sw_knl(
+    const int *d_bins, const float *d_weights_rowmajor, const int prev_node_num,
+    const int node_num, const int tot_elem_num, const int L, const int K,
+    const int bin_size, const int tbl_num_per_tile,
+    const int bucket_num_per_tbl, const int bucket_capacity, int *d_buckets,
+    int *d_bucket_sizes);
 
 // Assumption: previous layer is dense
 __global__ void get_hash_knl(const int *d_bins,

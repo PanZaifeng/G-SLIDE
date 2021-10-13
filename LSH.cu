@@ -93,21 +93,38 @@ void LSH::build(const float *d_weights_rowmajor, const bool reshuffle) {
   CUDA_CHECK(
       cudaMemset(d_bucket_sizes, 0, sizeof(int) * L * bucket_num_per_tbl));
 
-  const int thread_num = 64;
-  const int block_num = (node_num + thread_num - 1) / thread_num;
-  const int smem_size =
-      (K * bin_size * tbl_num_per_tile + thread_num * prev_node_num) *
-      sizeof(int);
-  if (tbl_num_per_thread == tbl_num_per_tile) {
-    init_hash_knl<<<block_num, thread_num, smem_size>>>(
+  int thread_num;
+  bool success_flag = false;
+  for (thread_num = 128; thread_num >= 32 && !success_flag; thread_num >>= 1) {
+    const int block_num = (node_num + thread_num - 1) / thread_num;
+    const int smem_size =
+        (K * bin_size * tbl_num_per_tile + thread_num * prev_node_num) *
+        sizeof(int);
+    if (is_smem_enough((void *)init_hash_knl, thread_num, smem_size)) {
+      if (tbl_num_per_thread == tbl_num_per_tile) {
+        init_hash_tt_knl<<<block_num, thread_num, smem_size>>>(
+            d_bins, d_weights_rowmajor, prev_node_num, node_num, tot_elem_num,
+            L, K, bin_size, tbl_num_per_tile, bucket_num_per_tbl,
+            bucket_capacity, d_buckets, d_bucket_sizes);
+      } else {
+        init_hash_knl<<<block_num, thread_num, smem_size>>>(
+            d_bins, d_weights_rowmajor, prev_node_num, node_num, tot_elem_num,
+            L, K, bin_size, tbl_num_per_tile, tbl_num_per_thread,
+            bucket_num_per_tbl, bucket_capacity, d_buckets, d_bucket_sizes);
+      }
+
+      success_flag = true;
+    }
+  }
+
+  if (!success_flag) {  // TODO
+    thread_num = 128;
+    const int block_num = (L + tbl_num_per_tile) / tbl_num_per_tile;
+    const int smem_size = sizeof(int) * K * bin_size * tbl_num_per_tile;
+    init_hash_no_sw_knl<<<block_num, thread_num, smem_size>>>(
         d_bins, d_weights_rowmajor, prev_node_num, node_num, tot_elem_num, L, K,
         bin_size, tbl_num_per_tile, bucket_num_per_tbl, bucket_capacity,
         d_buckets, d_bucket_sizes);
-  } else {
-    init_hash_knl<<<block_num, thread_num, smem_size>>>(
-        d_bins, d_weights_rowmajor, prev_node_num, node_num, tot_elem_num, L, K,
-        bin_size, tbl_num_per_tile, tbl_num_per_thread, bucket_num_per_tbl,
-        bucket_capacity, d_buckets, d_bucket_sizes);
   }
 }
 

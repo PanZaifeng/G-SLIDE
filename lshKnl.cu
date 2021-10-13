@@ -9,7 +9,7 @@
 
 __global__ void init_bins_knl(int *d_bins, const int prev_node_num,
                               const int tot_elem_num) {
-  const int tid= threadIdx.x + blockIdx.x * blockDim.x;
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if (tid >= tot_elem_num) return;
 
   d_bins[tid] = tid % prev_node_num;
@@ -18,7 +18,7 @@ __global__ void init_bins_knl(int *d_bins, const int prev_node_num,
 __global__ void gen_rand_keys_knl(unsigned int *d_rand_keys, const int seed,
                                   const int prev_node_num,
                                   const int tot_elem_num) {
-  const int tid= threadIdx.x + blockIdx.x * blockDim.x;
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if (tid >= tot_elem_num) return;
 
   const int permute_id = tid / prev_node_num;
@@ -33,7 +33,7 @@ __global__ void gen_rand_keys_knl(unsigned int *d_rand_keys, const int seed,
 
 __global__ void gen_rand_keys_knl(int *d_rand_keys, const int seed,
                                   const int node_num) {
-  const int tid= threadIdx.x + blockIdx.x * blockDim.x;
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if (tid >= node_num) return;
 
   thrust::minstd_rand rand_eng(seed);
@@ -43,14 +43,13 @@ __global__ void gen_rand_keys_knl(int *d_rand_keys, const int seed,
 }
 
 // Assumption: prev_node_num is small while node_num is large
-__global__ void init_hash_knl(const int *d_bins,
-                              const float *d_weights_rowmajor,
-                              const int prev_node_num, const int node_num,
-                              const int tot_elem_num, const int L, const int K,
-                              const int bin_size, const int tbl_num_per_tile,
-                              const int bucket_num_per_tbl,
-                              const int bucket_capacity, int *d_buckets,
-                              int *d_bucket_sizes) {
+// tt: one thread for each tile
+__global__ void init_hash_tt_knl(
+    const int *d_bins, const float *d_weights_rowmajor, const int prev_node_num,
+    const int node_num, const int tot_elem_num, const int L, const int K,
+    const int bin_size, const int tbl_num_per_tile,
+    const int bucket_num_per_tbl, const int bucket_capacity, int *d_buckets,
+    int *d_bucket_sizes) {
   const int elem_num_per_tile = K * bin_size * tbl_num_per_tile;
   extern __shared__ int smem[];
   int *s_tile_bins = smem;  // elem_num_per_tile
@@ -101,7 +100,7 @@ __global__ void init_hash_knl(const int *d_bins,
 
         const int glb_bucket_idx =
             bucket_idx + (i + tbl_begin) * bucket_num_per_tbl;
-        int pos =
+        const int pos =
             atomicAdd(d_bucket_sizes + glb_bucket_idx, 1) % bucket_capacity;
         d_buckets[pos + glb_bucket_idx * bucket_capacity] = node_idx;
       }
@@ -177,13 +176,60 @@ __global__ void init_hash_knl(
 
         const int glb_bucket_idx =
             bucket_idx + (i + tile_tbl_begin) * bucket_num_per_tbl;
-        int pos =
+        const int pos =
             atomicAdd(d_bucket_sizes + glb_bucket_idx, 1) % bucket_capacity;
         d_buckets[pos + glb_bucket_idx * bucket_capacity] = node_idx;
       }
     }
 
     __syncthreads();
+  }
+}
+
+// No shared memory for weights
+__global__ void init_hash_no_sw_knl(
+    const int *d_bins, const float *d_weights_rowmajor, const int prev_node_num,
+    const int node_num, const int tot_elem_num, const int L, const int K,
+    const int bin_size, const int tbl_num_per_tile,
+    const int bucket_num_per_tbl, const int bucket_capacity, int *d_buckets,
+    int *d_bucket_sizes) {
+  extern __shared__ int s_tile_bins[];  // K * bin_size * tbl_num_per_tile
+
+  const int log_bin_size = (int)logf(bin_size);
+
+  const int elem_num_per_tile = K * bin_size * tbl_num_per_tile;
+  const int tile_bin_begin = blockIdx.x * elem_num_per_tile;
+  FOR_IDX_ASYNC(bin_elem_idx, tile_bin_begin,
+                min(tot_elem_num, tile_bin_begin + elem_num_per_tile)) {
+    s_tile_bins[bin_elem_idx - tile_bin_begin] = d_bins[bin_elem_idx];
+  }
+  __syncthreads();
+
+  FOR_IDX_ASYNC(node_idx, 0, node_num) {
+    const float *d_node_weights = d_weights_rowmajor + node_idx * prev_node_num;
+    for (int i = 0;
+         i < tbl_num_per_tile && i + blockIdx.x * tbl_num_per_tile < L; ++i) {
+      int bucket_idx = 0;
+      for (int j = 0; j < K; ++j) {
+        float maxv = -FLT_MAX;
+        int hash = 0;
+        for (int k = 0; k < bin_size; ++k) {
+          int idx = s_tile_bins[(i * K + j) * bin_size + k];
+          float weight = d_node_weights[idx];
+          if (weight > maxv) {
+            maxv = weight;
+            hash = k;
+          }
+        }
+        bucket_idx += hash << ((K - 1 - j) * log_bin_size);
+      }
+
+      const int glb_bucket_idx =
+          bucket_idx + (i + blockIdx.x * tbl_num_per_tile) * bucket_num_per_tbl;
+      const int pos =
+          atomicAdd(d_bucket_sizes + glb_bucket_idx, 1) % bucket_capacity;
+      d_buckets[pos + glb_bucket_idx * bucket_capacity] = node_idx;
+    }
   }
 }
 
