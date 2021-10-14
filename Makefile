@@ -5,6 +5,7 @@ LD = -lcublas -ljsoncpp
 INC_DIR = include
 SRC_DIR = src
 OBJ_DIR = bin
+$(shell if [ ! -e $(OBJ_DIR) ];then mkdir -p $(OBJ_DIR); fi)
 
 EXE = runme
 
