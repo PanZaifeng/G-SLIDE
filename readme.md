@@ -25,7 +25,7 @@ The experiment environments in the paper are as follow:
 
 * cuBLAS
 * Thrust
-* [JsonCpp](https://github.com/open-source-parsers/jsoncpp): we use it to parse the configuration json file.
+* [JsonCpp](https://github.com/open-source-parsers/jsoncpp): we use it to parse the configuration json file. Please configure it properly before compiling.
 
 ### Compile and Run
 
@@ -37,11 +37,10 @@ cd G-SLIDE
 make
 ```
 
- Before running of G-SLIDE, you should download the dataset of Amazon-670K and configure the `amazon.json` properly. Then to run it:
+ Before running of G-SLIDE, you should download the **dataset** of Amazon-670K and re-configure the `amazon.json` properly. Note that there will be lots of information to be printed, so we recommend **redirecting stdout** when running.
 
 ```bash
-./runme ./amazon.json
+./runme ./amazon.json > amazon.log
 ```
-
 
 
