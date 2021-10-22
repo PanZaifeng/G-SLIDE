@@ -138,6 +138,7 @@ int main(int argc, char *argv[]) {
   GPUTimer timer;
   float tot_time = 0;
 
+  int glb_itr = 0;
   for (int e = 0; e < epoch_num; e++) {
     printf("------------------- Epoch %d ---------------------\n", e);
     std::ifstream train_ist(train_fname);
@@ -152,7 +153,6 @@ int main(int argc, char *argv[]) {
     std::getline(test_ist, header);   // skip header
 
     int batch_size;
-    int cnt = 0;
     do {
       std::vector<int> h_cmprs_input_nodes;
       std::vector<float> h_cmprs_input_vals;
@@ -164,10 +164,10 @@ int main(int argc, char *argv[]) {
                          h_cmprs_input_offsets, h_cmprs_labels,
                          h_cmprs_label_offsets, max_batch_size);
 
-      const float tmplr =
-          lr * sqrt((1 - pow(BETA2, cnt + 1))) / (1 - pow(BETA1, cnt + 1));
-      const bool rebuild = (cnt + 1) % rebuild_period == 0;
-      const bool reshuffle = (cnt + 1) % reshuffle_period == 0;
+      const float tmplr = lr * sqrt((1 - pow(BETA2, glb_itr + 1))) /
+                          (1 - pow(BETA1, glb_itr + 1));
+      const bool rebuild = (glb_itr + 1) % rebuild_period == 0;
+      const bool reshuffle = (glb_itr + 1) % reshuffle_period == 0;
 
       timer.start();
 
@@ -176,13 +176,10 @@ int main(int argc, char *argv[]) {
                     h_cmprs_label_offsets, max_act_nums, batch_size, tmplr,
                     max_label_num, thread_num, rebuild, reshuffle);
 
-      tot_time += timer.record("[BATCH " + std::to_string(cnt) + "] ");
+      tot_time += timer.record("[Iteration " + std::to_string(glb_itr) + "] ");
 
-      cnt++;
-      // if (cnt > 10) break;
-
+      glb_itr++;
     } while (batch_size == max_batch_size);
-    // network.rebuild(false);
 
     printf("Current elapsed time %f ms\n", tot_time);
 
