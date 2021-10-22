@@ -36,8 +36,6 @@ struct GPUMultiLinkedHashTable {
     return key * 2654435761 & (~(1 << 31));
   }
 
-  __device__ void d_block_add(const int tbl_id, const int key, bool exec_flag);
-
   __device__ void d_block_reduce_cnt(const int *d_raw_keys,
                                      const int raw_key_begin,
                                      const int raw_key_end, const int tbl_id);

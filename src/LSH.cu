@@ -1,9 +1,6 @@
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 
-#include <unordered_map>
-#include <vector>
-
 #include "LSH.h"
 #include "lshKnl.h"
 #include "utils.h"

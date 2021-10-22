@@ -24,7 +24,7 @@ class GPUTimer {
 
   void start() { CUDA_CHECK(cudaEventRecord(start_time)); }
 
-  // return the elapsed tiem from start_time to end_time
+  // return the elapsed time from start_time to end_time
   float record(std::string msg = "") {
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaEventRecord(end_time));
