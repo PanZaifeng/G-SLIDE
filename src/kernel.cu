@@ -520,6 +520,47 @@ __global__ void bp_rowmajor_knl(const CscActNodes csc_acts,
   }
 }
 
+__global__ void bp_rowmajor_no_sm_knl(const CscActNodes csc_acts,
+                                      const CscActNodes csc_prev,
+                                      const float *d_weights_rowmajor,
+                                      const float *d_cmprs_bp_deltas,
+                                      const int weight_col_num,
+                                      float *d_cmprs_prev_bp_deltas,
+                                      float *d_adam_ts, float *d_bias_adam_ts) {
+  const int act_begin = csc_acts.d_offsets[blockIdx.x];
+  const int act_end = csc_acts.d_offsets[blockIdx.x + 1];
+  const int prev_begin = csc_prev.d_offsets[blockIdx.x];
+  const int prev_end = csc_prev.d_offsets[blockIdx.x + 1];
+
+  FOR_IDX_ASYNC(act_idx, act_begin, act_end) {
+    const int act_node = csc_acts.d_nodes[act_idx];
+    const float bp_delta = d_cmprs_bp_deltas[act_idx];
+    atomicAdd(d_bias_adam_ts + act_node, bp_delta);
+  }
+  __syncthreads();
+
+  FOR_IDX_ASYNC(prev_idx, prev_begin, prev_end) {
+    const int prev_node = csc_prev.d_nodes[prev_idx];
+    const float prev_val = csc_prev.d_vals[prev_idx];
+    float prev_bp_delta = 0.;
+    for (int act_idx = act_begin; act_idx < act_end; ++act_idx) {
+      const int act_node = csc_acts.d_nodes[act_idx];
+      const int weight_idx = act_node * weight_col_num + prev_node;
+      const float bp_delta = d_cmprs_bp_deltas[act_idx];
+      if (prev_val > 0) {
+        const float weight = d_weights_rowmajor[weight_idx];
+        prev_bp_delta += bp_delta * weight;
+      }
+      atomicAdd(d_adam_ts + weight_idx, prev_val * bp_delta);
+    }
+
+    if (prev_val > 0) {
+      prev_bp_delta += d_cmprs_prev_bp_deltas[prev_idx];
+    }
+    d_cmprs_prev_bp_deltas[prev_idx] = prev_bp_delta;
+  }
+}
+
 __global__ void bp_rowmajor_slide_knl(
     const CscActNodes csc_acts, const CscActNodes csc_prev,
     const float *d_weights_rowmajor, const float *d_cmprs_bp_deltas,

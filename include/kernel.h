@@ -43,6 +43,14 @@ __global__ void bp_rowmajor_knl(const CscActNodes csc_acts,
                                 float *d_cmpr_prev_bp_deltas, float *d_adam_ts,
                                 float *d_bias_adam_ts);
 
+__global__ void bp_rowmajor_no_sm_knl(const CscActNodes csc_acts,
+                                      const CscActNodes csc_prev,
+                                      const float *d_weights_rowmajor,
+                                      const float *d_cmprs_bp_deltas,
+                                      const int weight_col_num,
+                                      float *d_cmprs_prev_bp_deltas,
+                                      float *d_adam_ts, float *d_bias_adam_ts);
+
 __global__ void bp_rowmajor_slide_knl(
     const CscActNodes csc_acts, const CscActNodes csc_prev,
     const float *d_weights_rowmajor, const float *d_cmprs_bp_deltas,

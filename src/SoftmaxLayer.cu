@@ -82,10 +82,14 @@ void SoftmaxLayer::bp(Layer &prev_layer, const int batch_size,
         prev_node_num, max_act_num, prev_layer.d_cmprs_bp_deltas,
         weight_adam.d_ts, bias_adam.d_ts);
   } else {
-    int smem_size = (sizeof(int) + sizeof(float) * 2) * max_prev_num;
-    bp_rowmajor_slide_knl<<<batch_size, thread_num, smem_size>>>(
+    // int smem_size = (sizeof(int) + sizeof(float) * 2) * max_prev_num;
+    // bp_rowmajor_slide_knl<<<batch_size, thread_num, smem_size>>>(
+    //     csc_acts, prev_layer.csc_acts, d_weights, d_cmprs_bp_deltas,
+    //     prev_node_num, max_prev_num, prev_layer.d_cmprs_bp_deltas,
+    //     weight_adam.d_ts, bias_adam.d_ts);
+    bp_rowmajor_no_sm_knl<<<batch_size, thread_num>>>(
         csc_acts, prev_layer.csc_acts, d_weights, d_cmprs_bp_deltas,
-        prev_node_num, max_prev_num, prev_layer.d_cmprs_bp_deltas,
-        weight_adam.d_ts, bias_adam.d_ts);
+        prev_node_num, prev_layer.d_cmprs_bp_deltas, weight_adam.d_ts,
+        bias_adam.d_ts);
   }
 }
