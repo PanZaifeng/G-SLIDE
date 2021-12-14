@@ -4,7 +4,7 @@ G-SLIDE is a GPU-based sub-linear deep learning engine via LSH sparsification of
 
 ## Dataset
 
-The Datasets can be downloaded in [Amazon-670K](https://drive.google.com/open?id=0B3lPMIHmG6vGdUJwRzltS1dvUVk).
+The Datasets can be downloaded in [Amazon-670K](https://drive.google.com/open?id=0B3lPMIHmG6vGdUJwRzltS1dvUVk) and [WikiLSHTC-325K](https://drive.google.com/file/d/0B3lPMIHmG6vGSHE1SWx4TVRva3c/view?resourcekey=0-ZGNqdLuqttRdnAj-U0bktA).
 
 ## Baselines
 
@@ -12,7 +12,7 @@ The baseline is [SLIDE](https://github.com/keroro824/HashingDeepLearning). The s
 
 ## Running G-SLIDE
 
-### Environments
+### Tested Environments
 
 The experiment environments in the paper are as follow:
 
@@ -20,27 +20,27 @@ The experiment environments in the paper are as follow:
 * Compiler: nvcc 11.1
 * GPU: 2080ti
 * CPU: Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz
+* CMake：3.14 and above
 
 ### Dependencies
 
 * cuBLAS
 * Thrust
-* [JsonCpp](https://github.com/open-source-parsers/jsoncpp): we use it to parse the configuration json file. Please configure it properly before compiling.
+* [JsonCpp](https://github.com/open-source-parsers/jsoncpp): we use it to parse the configuration json file.
 
 ### Compile and Run
 
-We've provided the Makefile so to compile the project:
+Type the following commands to compile the project:
 
 ```bash
 git clone https://github.com/PanZaifeng/G-SLIDE.git
 cd G-SLIDE
-make
+cmake -B build
+cmake --build build
 ```
 
- Before running of G-SLIDE, you should download the **dataset** of Amazon-670K and re-configure the `amazon.json` properly. Note that there will be lots of information to be printed, so we recommend **redirecting stdout** when running.
+Before running G-SLIDE, you should download the **dataset** of Amazon-670K and re-configure the `amazon.json` properly. Note that there will be lots of information to be printed, so we recommend **redirecting stdout** when running.
 
 ```bash
 ./runme ./amazon.json > amazon.log
 ```
-
-

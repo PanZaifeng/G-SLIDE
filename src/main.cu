@@ -7,7 +7,7 @@
 
 #include "GPUTimer.h"
 #include "Network.h"
-#include "jsoncpp/json/json.h"
+#include "json/json.h"
 #include "utils.h"
 
 std::vector<int> jarr_to_vec(const Json::Value &jarr) {
