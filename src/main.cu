@@ -164,6 +164,8 @@ int main(int argc, char *argv[]) {
                          h_cmprs_input_offsets, h_cmprs_labels,
                          h_cmprs_label_offsets, max_batch_size);
 
+      if (batch_size == 0) break;
+
       const float tmplr = lr * sqrt((1 - pow(BETA2, glb_itr + 1))) /
                           (1 - pow(BETA1, glb_itr + 1));
       const bool rebuild = (glb_itr + 1) % rebuild_period == 0;
@@ -196,17 +198,13 @@ int main(int argc, char *argv[]) {
                          h_cmprs_input_offsets, h_cmprs_labels,
                          h_cmprs_label_offsets, max_batch_size);
 
-      timer.start();
+      if (batch_size == 0) break;
 
       correct_cnt += network.eval(
           h_cmprs_input_nodes, h_cmprs_input_vals, h_cmprs_input_offsets,
           h_cmprs_labels, h_cmprs_label_offsets, batch_size, thread_num);
 
-      // timer.record("Infer time ");
-
       test_cnt += batch_size;
-      // if (test_cnt >= 512) break;
-
     } while (batch_size == max_batch_size);
 
     printf("Test %d records, %d correct; accuracy: %f\n", test_cnt, correct_cnt,
