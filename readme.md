@@ -1,6 +1,6 @@
 # G-SLIDE
 
-G-SLIDE is a GPU-based sub-linear deep learning engine via LSH sparsification of fully-connected neural networks. The details can be found in this [paper]().
+G-SLIDE is a GPU-based sub-linear deep learning engine via LSH sparsification of fully-connected neural networks. The details can be found in this [paper](https://ieeexplore.ieee.org/document/9635657).
 
 ## Dataset
 
