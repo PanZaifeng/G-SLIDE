@@ -106,6 +106,7 @@ Install and  compile G-SLIDE:
 
 ```bash
 git clone https://github.com/PanZaifeng/G-SLIDE.git
+cd G-SLIDE
 git checkout codeocean
 make
 ```
