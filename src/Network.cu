@@ -114,17 +114,18 @@ void Network::train(const std::vector<int> &h_cmprs_input_nodes,
       relu_layers[l]->forward(*relu_layers[l - 1], batch_size, thread_num,
                               max_act_nums[l]);
     }
-    // timer.record("[FW " + std::to_string(l) + "] ");
+    timer.record("[FW" + std::to_string(l) + "] ");
   }
   softmax_layer->forward(*relu_layers.back(), cmprs_labels, batch_size,
                          thread_num, *(max_act_nums.end() - 2),
                          max_act_nums.back(), max_label_num);
-  // timer.record("[FW " + std::to_string(layer_num - 1) + "] ");
+  // timer.record("[FW" + std::to_string(layer_num - 1) + "] ");
+  timer.record();
 
   // backpropagate
   softmax_layer->bp(*relu_layers.back(), batch_size, thread_num,
                     *(max_act_nums.end() - 2), max_act_nums.back());
-  // timer.record("[BP " + std::to_string(layer_num - 1) + "] ");
+  timer.record("[BP" + std::to_string(layer_num - 1) + "] ");
   for (int l = relu_layers.size() - 1; l >= 0; --l) {
     if (l == 0) {
       relu_layers[l]->bp_first_layer(csc_inputs, batch_size, thread_num,
@@ -133,22 +134,22 @@ void Network::train(const std::vector<int> &h_cmprs_input_nodes,
       relu_layers[l]->bp(*relu_layers[l - 1], batch_size, thread_num,
                          max_act_nums[l]);
     }
-    // timer.record("[BP " + std::to_string(l) + "] ");
+    timer.record("[BP" + std::to_string(l) + "] ");
   }
 
   // update
   for (int l = 0; l < relu_layers.size(); ++l) {
     relu_layers[l]->update_weights(thread_num, lr);
     relu_layers[l]->update_biases(thread_num, lr);
-    // timer.record("[UPDATE " + std::to_string(l) + "] ");
+    timer.record("[UD" + std::to_string(l) + "] ");
   }
   softmax_layer->update_weights(thread_num, lr);
   softmax_layer->update_biases(thread_num, lr);
-  // timer.record("[UPDATE " + std::to_string(layer_num - 1) + "] ");
+  timer.record("[UD" + std::to_string(layer_num - 1) + "] ");
 
   if (rebuild || reshuffle) {
     softmax_layer->rebuild(reshuffle);
-    // timer.record("[REBUILD] ");
+    timer.record("[LSH_RC] ");
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());

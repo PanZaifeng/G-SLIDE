@@ -20,8 +20,8 @@
   "rebuild_period": 6400,
   "reshuffle_period": 128000,
   "thread_num": 128,
-  "epoch_num": 20,
+  "epoch_num": 10,
 
-  "train_fname": "dataset/Amazon/amazon_train.txt",
-  "test_fname": "dataset/Amazon/amazon_test.txt"
+  "train_fname": "data/amazon_partial_train.txt",
+  "test_fname": "data/amazon_partial_test.txt"
 }
